@@ -37,24 +37,30 @@ if (isMockMode) {
     console.error('Unexpected error on idle PostgreSQL client:', err);
   });
   console.log('🐘 Using PostgreSQL database connection.');
+  initPostgres(pool);
 } else {
   // SQLite Mode (Default for local development & single-instance deployments)
-  const sqlite3 = require('sqlite3').verbose();
-  const sqliteDbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, '../../data/temple.db');
-  const dataDir = path.dirname(sqliteDbPath);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-
-  sqliteDb = new sqlite3.Database(sqliteDbPath, (err) => {
-    if (err) {
-      console.error('❌ Failed to connect to SQLite database:', err.message);
-    } else {
-      console.log(`🗄️ Using persistent SQLite database at: ${sqliteDbPath}`);
-      // Auto-initialize schema if needed
-      initSqlite(sqliteDb);
+  try {
+    const sqlite3 = require('sqlite3').verbose();
+    const sqliteDbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, '../../data/temple.db');
+    const dataDir = path.dirname(sqliteDbPath);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
-  });
+
+    sqliteDb = new sqlite3.Database(sqliteDbPath, (err) => {
+      if (err) {
+        console.error('❌ Failed to connect to SQLite database:', err.message);
+      } else {
+        console.log(`🗄️ Using persistent SQLite database at: ${sqliteDbPath}`);
+        // Auto-initialize schema if needed
+        initSqlite(sqliteDb);
+      }
+    });
+  } catch (err) {
+    console.warn('⚠️ Could not load sqlite3 native binary:', err.message);
+    console.log('💡 Render Tip: For cloud deployment, connect Render PostgreSQL by setting DATABASE_URL in Environment Variables.');
+  }
 }
 
 function initSqlite(dbInstance) {
@@ -66,6 +72,19 @@ function initSqlite(dbInstance) {
         console.error('⚠️ SQLite schema initialization error:', err.message);
       }
     });
+  }
+}
+
+async function initPostgres(poolInstance) {
+  try {
+    const schemaPath = path.join(__dirname, '../../db/schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      const sql = fs.readFileSync(schemaPath, 'utf8');
+      await poolInstance.query(sql);
+      console.log('✅ PostgreSQL schema verified/initialized successfully.');
+    }
+  } catch (err) {
+    console.error('⚠️ Could not auto-initialize PostgreSQL schema:', err.message);
   }
 }
 
@@ -89,11 +108,11 @@ function translatePgQueryToSqlite(sql, params) {
  * Executes a query against SQLite
  */
 function sqliteQuery(text, params = []) {
-  return new Promise((resolve, reject) => {
-    if (!sqliteDb) {
-      return reject(new Error('SQLite database is not initialized'));
-    }
+  if (!sqliteDb) {
+    return mockDb.query(text, params);
+  }
 
+  return new Promise((resolve, reject) => {
     const { sql, params: mappedParams } = translatePgQueryToSqlite(text, params);
     const trimmed = text.trim();
     const isReturning = /RETURNING/i.test(trimmed);
