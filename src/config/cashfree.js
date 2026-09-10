@@ -1,10 +1,14 @@
 const crypto = require('crypto');
 
+/**
+ * Mock mode requires EXPLICIT opt-in (fail closed).
+ * Missing or placeholder Cashfree credentials MUST NOT enable mock mode,
+ * otherwise a production deploy that loses its credentials would silently
+ * expose the mock checkout simulator and mock payment APIs.
+ */
 function getIsMockMode() {
   return process.env.MOCK_MODE === 'true' ||
-    process.env.MOCK_PAYMENT === 'true' ||
-    !process.env.CASHFREE_APP_ID ||
-    process.env.CASHFREE_APP_ID.startsWith('TEST10000000000000000000000000000001');
+    process.env.MOCK_PAYMENT === 'true';
 }
 
 const CASHFREE_ENV = (process.env.CASHFREE_ENV || 'sandbox').toLowerCase();
@@ -53,7 +57,7 @@ async function createCashfreeOrder({
   notifyUrl,
   orderNote
 }) {
-  // 1. If in mock mode, return mock order without external network call
+  // 1. If explicitly in mock mode, return mock order without external network call
   if (getIsMockMode()) {
     console.log(`💡 [Mock Mode] Created mock Cashfree order: ${orderId} (₹${orderAmount})`);
     const mockOrder = {
@@ -70,6 +74,14 @@ async function createCashfreeOrder({
     };
     mockOrders.set(orderId, mockOrder);
     return mockOrder;
+  }
+
+  // Fail closed: missing credentials must NEVER fall back to simulated payment.
+  if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
+    console.error('❌ Cashfree is not configured: CASHFREE_APP_ID/CASHFREE_SECRET_KEY missing. Refusing to create order.');
+    const err = new Error('Payment gateway is not configured. Please try again later.');
+    err.status = 500;
+    throw err;
   }
 
   const endpoint = `${CASHFREE_BASE_URL}/pg/orders`;
@@ -124,18 +136,27 @@ async function createCashfreeOrder({
  * Endpoint: GET /pg/orders/{order_id}
  */
 async function getCashfreeOrder(orderId) {
-  // 1. If in mock mode, return order status from mock store
+  // 1. If explicitly in mock mode, return order status from mock store
+  // NOTE: never invent an amount for unknown orders (would mask variable-total bugs).
   if (getIsMockMode()) {
     const order = mockOrders.get(orderId);
     if (!order) {
-      console.log(`💡 [Mock Mode] Order ${orderId} not found in mock store, returning ACTIVE`);
+      console.log(`💡 [Mock Mode] Order ${orderId} not found in mock store, returning ACTIVE with unknown amount`);
       return {
         order_id: orderId,
         order_status: 'ACTIVE',
-        order_amount: 1000
+        order_amount: null
       };
     }
     return order;
+  }
+
+  // Fail closed: never query the gateway without credentials, never fall back to mock.
+  if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
+    console.error('❌ Cashfree is not configured: CASHFREE_APP_ID/CASHFREE_SECRET_KEY missing. Refusing to verify order.');
+    const err = new Error('Payment gateway is not configured. Please try again later.');
+    err.status = 500;
+    throw err;
   }
 
   const endpoint = `${CASHFREE_BASE_URL}/pg/orders/${encodeURIComponent(orderId)}`;
@@ -159,12 +180,17 @@ async function getCashfreeOrder(orderId) {
 }
 
 /**
- * Allows simulating payment success or failure in mock mode
+ * Allows simulating payment success or failure in mock mode.
+ * Preserves the actual order amount; never invents 1000 for unknown orders.
+ * Optional orderAmount lets tests simulate amount mismatches.
  */
-function setMockOrderStatus(orderId, status = 'PAID') {
+function setMockOrderStatus(orderId, status = 'PAID', orderAmount = null) {
   if (mockOrders.has(orderId)) {
     const order = mockOrders.get(orderId);
     order.order_status = status;
+    if (orderAmount !== null && orderAmount !== undefined) {
+      order.order_amount = Number(orderAmount);
+    }
     mockOrders.set(orderId, order);
     console.log(`💡 [Mock Mode] Order ${orderId} status set to: ${status}`);
     return order;
@@ -172,11 +198,21 @@ function setMockOrderStatus(orderId, status = 'PAID') {
     const newOrder = {
       order_id: orderId,
       order_status: status,
-      order_amount: 1000
+      order_amount: orderAmount !== null && orderAmount !== undefined ? Number(orderAmount) : null
     };
     mockOrders.set(orderId, newOrder);
     return newOrder;
   }
+}
+
+function setMockOrderAmount(orderId, orderAmount) {
+  const order = mockOrders.get(orderId);
+  if (order) {
+    order.order_amount = Number(orderAmount);
+    mockOrders.set(orderId, order);
+    return order;
+  }
+  return setMockOrderStatus(orderId, 'ACTIVE', orderAmount);
 }
 
 /**
@@ -221,6 +257,7 @@ module.exports = {
   createCashfreeOrder,
   getCashfreeOrder,
   setMockOrderStatus,
+  setMockOrderAmount,
   verifyWebhookSignature,
   CASHFREE_BASE_URL,
   CASHFREE_ENV,

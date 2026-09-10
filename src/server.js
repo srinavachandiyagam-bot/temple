@@ -6,6 +6,7 @@ const fs = require('fs');
 
 const apiRoutes = require('./routes/api');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const requireMockMode = require('./middleware/requireMockMode');
 
 // Ensure essential persistence directories exist on startup (especially for fresh Hostinger deployments)
 const requiredDirs = [
@@ -20,6 +21,31 @@ for (const dir of requiredDirs) {
     } catch (e) {
       console.warn(`Could not create directory ${dir}:`, e.message);
     }
+  }
+}
+
+// Ensure DB-backed registration fee is seeded early (non-mock only).
+// Pricing lookups ALSO lazily ensure seeding, so the first registration after
+// startup can never charge a different fee even if this async init is still
+// in flight. Existing DB rows are never overwritten.
+if (process.env.MOCK_MODE !== 'true') {
+  try {
+    const { ensureRegistrationFeeSeeded } = require('./config/registrationFeeStore');
+    // Defer slightly so SQLite file init in db.js has a chance to complete;
+    // ensureRegistrationFeeSeeded itself creates app_settings if needed.
+    setImmediate(() => {
+      ensureRegistrationFeeSeeded()
+        .then((fee) => {
+          if (fee !== null && fee !== undefined) {
+            console.log(`💰 Canonical registration fee ready: ₹${fee}`);
+          }
+        })
+        .catch((e) => {
+          console.warn('⚠️ Registration fee bootstrap failed (will retry lazily on pricing reads):', e.message);
+        });
+    });
+  } catch (e) {
+    console.warn('⚠️ Could not bootstrap registration fee:', e.message);
   }
 }
 
@@ -39,6 +65,16 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: true }));
+
+// 3a. Mock checkout page (mock mode only).
+// Must be BEFORE static (so /mock-checkout.html is also guarded) and BEFORE
+// the frontend catch-all (so /mock-checkout?order_id=ABC serves
+// mock-checkout.html with its query string intact, not index.html).
+// requireMockMode uses the same getIsMockMode() determination as
+// createCashfreeOrder(). Non-mock requests get 404.
+app.get(['/mock-checkout', '/mock-checkout.html'], requireMockMode, (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/mock-checkout.html'));
+});
 
 // 3. Serve frontend static assets from public/ directory
 app.use(express.static(path.join(__dirname, '../public')));

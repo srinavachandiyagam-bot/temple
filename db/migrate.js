@@ -36,9 +36,12 @@ async function runMigration() {
 
       console.log('🔄 Applying PostgreSQL schema migrations from db/schema.sql...');
       await client.query(schemaSql);
+      // Backward-compatible: existing tables created before donation_amount existed
+      await client.query(`ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS donation_amount NUMERIC(10, 2) NOT NULL DEFAULT 0`);
       console.log('✅ PostgreSQL schema migration completed successfully!');
       console.log('   - Table: registrations created/verified');
       console.log('   - Table: registration_members created/verified');
+      console.log('   - Column: registrations.donation_amount verified');
       console.log('   - Indexes & triggers created/verified');
 
       client.release();
@@ -75,11 +78,37 @@ async function runMigration() {
         db.close();
         process.exit(1);
       }
-      console.log('✅ SQLite schema migration completed successfully!');
-      console.log('   - Table: registrations created/verified');
-      console.log('   - Table: registration_members created/verified');
-      console.log('   - Indexes & triggers created/verified');
-      db.close();
+      // Backward-compatible: add donation_amount to pre-existing SQLite tables
+      db.all(`PRAGMA table_info(registrations)`, (pragmaErr, cols) => {
+        if (pragmaErr) {
+          console.error('❌ SQLite pragma check failed:', pragmaErr.message);
+          db.close();
+          process.exit(1);
+          return;
+        }
+        const hasDonation = (cols || []).some((c) => c.name === 'donation_amount');
+        const finish = () => {
+          console.log('✅ SQLite schema migration completed successfully!');
+          console.log('   - Table: registrations created/verified');
+          console.log('   - Table: registration_members created/verified');
+          console.log('   - Column: registrations.donation_amount verified');
+          console.log('   - Indexes & triggers created/verified');
+          db.close();
+        };
+        if (hasDonation) {
+          finish();
+          return;
+        }
+        db.run(`ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0`, (alterErr) => {
+          if (alterErr) {
+            console.error('❌ SQLite donation_amount migration failed:', alterErr.message);
+            db.close();
+            process.exit(1);
+            return;
+          }
+          finish();
+        });
+      });
     });
   }
 }

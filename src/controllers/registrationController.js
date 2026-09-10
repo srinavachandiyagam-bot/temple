@@ -1,14 +1,26 @@
 const { getClient } = require('../config/db');
 const { createCashfreeOrder, CASHFREE_ENV } = require('../config/cashfree');
 const { generateRegistrationId, generateCashfreeOrderId } = require('../utils/idGenerator');
+const { calculatePaymentAmounts } = require('../config/pricing');
 
 /**
  * Controller to handle devotee registration and Cashfree payment order creation
  * Endpoint: POST /api/register
  */
 async function registerDevotee(req, res, next) {
-  const { name, mobile, email, address, rasi, natchathiram, gothram, members } = req.sanitizedBody;
-  const amount = Number(process.env.REGISTRATION_AMOUNT || 1000.00);
+  const { name, mobile, email, address, rasi, natchathiram, gothram, members, donationAmount } = req.sanitizedBody;
+  // Server is the authority: registration fee from admin settings, donation validated above.
+  // Any client-sent registrationFee/amount/totalAmount is ignored.
+  let pricing;
+  try {
+    pricing = await calculatePaymentAmounts(donationAmount);
+  } catch (pricingErr) {
+    const status = pricingErr.status || 500;
+    return res.status(status).json({ success: false, error: pricingErr.message || 'Invalid payment amounts.' });
+  }
+  const registrationFee = pricing.registrationFee;
+  const donation = pricing.donationAmount;
+  const amount = pricing.totalAmount;
 
   // 1. Generate unique identifiers
   const registrationId = generateRegistrationId();
@@ -28,27 +40,61 @@ async function registerDevotee(req, res, next) {
     await client.query('BEGIN');
 
     // 4. Insert into registrations table with pending_payment status
+    // amount = TOTAL charged (fee + donation) for backward compatibility.
     const insertRegQuery = `
       INSERT INTO registrations (
         registration_id, name, mobile, email, address,
         rasi, natchathiram, gothram, payment_status,
-        cashfree_order_id, amount
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10)
+        cashfree_order_id, amount, donation_amount
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11)
       RETURNING id, registration_id, name, mobile, payment_status, created_at;
     `;
 
-    const regResult = await client.query(insertRegQuery, [
-      registrationId,
-      name,
-      mobile,
-      email,
-      address,
-      rasi,
-      natchathiram,
-      gothram,
-      cashfreeOrderId,
-      amount
-    ]);
+    const regResult = await (async () => {
+      try {
+        return await client.query(insertRegQuery, [
+          registrationId,
+          name,
+          mobile,
+          email,
+          address,
+          rasi,
+          natchathiram,
+          gothram,
+          cashfreeOrderId,
+          amount,
+          donation
+        ]);
+      } catch (insertErr) {
+        // Backward-compatible fallback for databases not yet migrated
+        // (missing donation_amount column): store total in amount only.
+        const msg = String((insertErr && insertErr.message) || '');
+        if (/donation_amount|no such column|undefined column/i.test(msg)) {
+          console.warn('donation_amount column missing, falling back to legacy insert (total in amount only).');
+          const legacyQuery = `
+            INSERT INTO registrations (
+              registration_id, name, mobile, email, address,
+              rasi, natchathiram, gothram, payment_status,
+              cashfree_order_id, amount
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10)
+            RETURNING id, registration_id, name, mobile, payment_status, created_at;
+          `;
+          return client.query(legacyQuery, [
+            registrationId,
+            name,
+            mobile,
+            email,
+            address,
+            rasi,
+            natchathiram,
+            gothram,
+            cashfreeOrderId,
+            amount
+          ]);
+        }
+        throw insertErr;
+      }
+    })();
 
     const createdRegistration = regResult.rows[0];
 
@@ -100,6 +146,7 @@ async function registerDevotee(req, res, next) {
     await client.query('COMMIT');
 
     // 8. Return payment session and order details to frontend
+    // Server response is authoritative if frontend preview differs.
     return res.status(201).json({
       success: true,
       message: 'Registration created successfully. Please proceed with payment.',
@@ -107,6 +154,8 @@ async function registerDevotee(req, res, next) {
       orderId: cashfreeOrderId,
       paymentSessionId: cashfreeOrder.payment_session_id,
       paymentMode: CASHFREE_ENV,
+      registrationFee,
+      donationAmount: donation,
       amount,
       mockCheckoutUrl: cashfreeOrder.mock_checkout_url || (cashfreeOrder.payment_session_id && cashfreeOrder.payment_session_id.startsWith('session_mock_') ? `/mock-checkout?order_id=${encodeURIComponent(cashfreeOrderId)}` : null)
     });

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS registrations (
     payment_status VARCHAR(50) NOT NULL DEFAULT 'pending',
     cashfree_order_id VARCHAR(100) UNIQUE,
     amount NUMERIC(10, 2) NOT NULL DEFAULT 1000.00,
+    donation_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -67,4 +68,13 @@ CREATE TABLE IF NOT EXISTS admin_users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users (username);
+
+-- 6. App Settings Table (canonical registration fee persistence)
+-- Survives Render ephemeral filesystem restarts via PostgreSQL.
+-- Only registration_amount is canonical here; other settings stay in settings.json.
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 

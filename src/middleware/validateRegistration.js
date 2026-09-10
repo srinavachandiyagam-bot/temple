@@ -1,6 +1,8 @@
 /**
  * Validation middleware for devotee registration requests
  */
+const { normalizeDonationAmount } = require('../config/pricing');
+
 function validateRegistration(req, res, next) {
   const { name, mobile, email, address, rasi, natchathiram, gothram } = req.body || {};
   const errors = [];
@@ -52,6 +54,18 @@ function validateRegistration(req, res, next) {
     }
   }
 
+  // NOTE: Only `donationAmount` is participant-controlled money.
+  // registrationFee / registrationAmount / amount / totalAmount / order_amount
+  // sent by the client are NEVER trusted and are ignored (server is authority).
+  const donation = normalizeDonationAmount(req.body ? req.body.donationAmount : undefined);
+  if (!donation.valid) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid donation amount. Please enter 0 or a positive INR amount with up to 2 decimals.',
+      errors: ['Invalid donation amount. Please enter 0 or a positive INR amount with up to 2 decimals.']
+    });
+  }
+
   if (errors.length > 0) {
     return res.status(400).json({
       success: false,
@@ -69,6 +83,7 @@ function validateRegistration(req, res, next) {
     rasi: rasi && typeof rasi === 'string' ? rasi.trim() : null,
     natchathiram: natchathiram && typeof natchathiram === 'string' ? natchathiram.trim() : null,
     gothram: gothram && typeof gothram === 'string' ? gothram.trim() : null,
+    donationAmount: donation.value,
     members: []
   };
 

@@ -1,7 +1,41 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 process.env.MOCK_MODE = 'true';
 
+const settingsPath = path.join(__dirname, '../data/settings.json');
+let settingsBackup = null;
+try {
+  settingsBackup = fs.readFileSync(settingsPath, 'utf8');
+} catch (e) {
+  settingsBackup = null;
+}
+
+function setFeeAmount(value) {
+  const raw = fs.readFileSync(settingsPath, 'utf8');
+  const data = JSON.parse(raw);
+  data.settings = data.settings || {};
+  data.settings.amount = String(value);
+  fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function restoreSettings() {
+  if (settingsBackup !== null) {
+    fs.writeFileSync(settingsPath, settingsBackup, 'utf8');
+  }
+}
+
+// Deterministic fee: admin-configurable fees mean this test must not depend on
+// whatever amount a developer left in data/settings.json.
+const EXPECTED_FEE = 1000;
+try {
+  setFeeAmount(String(EXPECTED_FEE));
+} catch (e) {
+  console.error('Failed to set deterministic test fee:', e.message);
+}
+
 const app = require('../src/server');
+const { getCashfreeOrder } = require('../src/config/cashfree');
 
 let server;
 const PORT = 3789;
@@ -46,6 +80,7 @@ async function runMockFlowTest() {
     assert.ok(regData.registrationId.startsWith('NCY-'));
     assert.ok(regData.orderId.startsWith('order_NCY'));
     assert.ok(regData.mockCheckoutUrl.includes(regData.orderId));
+    assert.strictEqual(Number(regData.amount), EXPECTED_FEE);
     console.log(`     ✅ Registration Created: ${regData.registrationId} | Order: ${regData.orderId}`);
 
     const { registrationId, orderId } = regData;
@@ -56,7 +91,9 @@ async function runMockFlowTest() {
     const infoData = await infoRes.json();
     assert.strictEqual(infoRes.status, 200);
     assert.strictEqual(infoData.order.name, 'Karthik Raja');
-    assert.strictEqual(infoData.order.amount, 1000);
+    assert.strictEqual(Number(infoData.order.amount), EXPECTED_FEE);
+    const cfOrder = await getCashfreeOrder(orderId);
+    assert.strictEqual(Number(cfOrder.order_amount), EXPECTED_FEE);
     console.log(`     ✅ Mock Order Info retrieved: Devotee = ${infoData.order.name}, Amount = ₹${infoData.order.amount}`);
 
     // 3. Verify Payment before paying (should be pending)
@@ -106,18 +143,20 @@ async function runMockFlowTest() {
     const sumData = await sumRes.json();
     assert.strictEqual(sumRes.status, 200);
     assert.strictEqual(sumData.stats.paid_registrations, '1');
-    assert.strictEqual(sumData.stats.total_collected, '1000');
+    assert.strictEqual(String(sumData.stats.total_collected), String(EXPECTED_FEE));
     console.log(`     ✅ Admin Stats: Paid Registrations = ${sumData.stats.paid_registrations}, Total Collected = ₹${sumData.stats.total_collected}`);
 
     console.log('\n🎉 ALL 7 END-TO-END MOCK FLOW TESTS PASSED!\n');
 
   } finally {
     server.close();
+    try { restoreSettings(); } catch (e) {}
   }
 }
 
 runMockFlowTest().catch(err => {
   console.error('❌ Mock flow test failed:', err);
+  try { restoreSettings(); } catch (e) {}
   if (server) server.close();
   process.exit(1);
 });
