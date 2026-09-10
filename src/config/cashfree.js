@@ -122,6 +122,7 @@ async function createCashfreeOrder({
 /**
  * Fetches order details from Cashfree Orders API
  * Endpoint: GET /pg/orders/{order_id}
+ * Also tries to fetch payments if available to enrich status
  */
 async function getCashfreeOrder(orderId) {
   // 1. If in mock mode, return order status from mock store
@@ -153,6 +154,29 @@ async function getCashfreeOrder(orderId) {
     err.status = response.status;
     err.details = data;
     throw err;
+  }
+
+  // Optionally fetch payments to determine true status (PAID even if order_status lag)
+  try {
+    const payEndpoint = `${CASHFREE_BASE_URL}/pg/orders/${encodeURIComponent(orderId)}/payments`;
+    const payRes = await fetch(payEndpoint, {
+      method: 'GET',
+      headers: getHeaders()
+    });
+    if (payRes.ok) {
+      const payData = await payRes.json();
+      if (Array.isArray(payData) && payData.length > 0) {
+        data.payments = payData;
+        const hasSuccess = payData.some(p => String(p.payment_status || '').toUpperCase() === 'SUCCESS');
+        if (hasSuccess && data.order_status !== 'PAID') {
+          data.order_status = 'PAID';
+        }
+      } else if (payData && Array.isArray(payData.payments) && payData.payments.length > 0) {
+        data.payments = payData.payments;
+      }
+    }
+  } catch (e) {
+    // Non-fatal
   }
 
   return data;

@@ -8,29 +8,118 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
+const DEFAULT_SETTINGS = {
+  payment_mode: 'fixed',
+  default_amount: '1000',
+  minimum_custom_amount: '100',
+  amount: '1000',
+  currency: 'INR',
+  payment_provider: 'cashfree',
+  payment_environment: 'sandbox',
+  max_family: '4',
+  hero_opacity: '0.68'
+};
+
+function ensureDefaults(settings) {
+  let changed = false;
+  for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
+    if (settings[k] === undefined || settings[k] === null || String(settings[k]).trim() === '') {
+      settings[k] = v;
+      changed = true;
+    }
+  }
+  // Alias legacy amount to default_amount if needed
+  if (settings.default_amount === DEFAULT_SETTINGS.default_amount && settings.amount && String(settings.amount).trim() !== '') {
+    // keep amount as is but ensure default_amount reflects it if not explicitly set
+    if (!settings._migrated_amount) {
+      // don't override default_amount if user already customized payment_mode
+    }
+  }
+  // Ensure payment_mode is valid
+  if (!['fixed','custom'].includes(String(settings.payment_mode))) {
+    settings.payment_mode = 'fixed';
+    changed = true;
+  }
+  // Ensure currency
+  if (!settings.currency) settings.currency = 'INR';
+  return changed;
+}
+
 function loadData() {
   if (fs.existsSync(settingsFile)) {
     try {
       const raw = fs.readFileSync(settingsFile, 'utf8');
-      return JSON.parse(raw);
+      const data = JSON.parse(raw);
+      if (!data.settings) data.settings = {};
+      if (!data.images) data.images = [];
+      if (!data.videos) data.videos = [];
+      if (ensureDefaults(data.settings)) {
+        // Persist defaults migration silently
+        try { fs.writeFileSync(settingsFile, JSON.stringify(data, null, 2), 'utf8'); } catch(e){}
+      }
+      return data;
     } catch (e) {
       console.error('Error reading settings.json:', e);
     }
   }
-  return { settings: {}, images: [], videos: [] };
+  return { settings: { ...DEFAULT_SETTINGS }, images: [], videos: [] };
 }
 
 function saveData(data) {
+  if (data.settings) ensureDefaults(data.settings);
   fs.writeFileSync(settingsFile, JSON.stringify(data, null, 2), 'utf8');
 }
 
 function getPublicData() {
-  return loadData();
+  const data = loadData();
+  // Ensure public data always has payment fields sanitized for frontend (no secrets)
+  if (ensureDefaults(data.settings)) {
+    try { fs.writeFileSync(settingsFile, JSON.stringify(data, null, 2), 'utf8'); } catch(e){}
+  }
+  // Include centralized Rasi / Nakshatra lists for frontend (single source of truth via constants.js)
+  try {
+    const { RASI_LIST, NAKSHATRA_LIST } = require('../utils/constants');
+    if (!data.rasi) data.rasi = RASI_LIST;
+    if (!data.nakshatra) data.nakshatra = NAKSHATRA_LIST;
+    // Also provide aliases for older frontend keys
+    if (!data.rasi_list) data.rasi_list = RASI_LIST;
+  } catch(e) {}
+  return data;
 }
 
 function updateSettings(newSettings) {
   const data = loadData();
-  data.settings = Object.assign({}, data.settings, newSettings);
+  // Whitelist allowed keys and normalize payment fields
+  const normalized = { ...newSettings };
+  if (normalized.payment_mode !== undefined) {
+    const pm = String(normalized.payment_mode).toLowerCase();
+    normalized.payment_mode = pm === 'custom' ? 'custom' : 'fixed';
+  }
+  if (normalized.default_amount !== undefined) {
+    const da = Number(normalized.default_amount);
+    if (!Number.isFinite(da) || da <= 0) throw new Error('default_amount must be a positive number');
+    normalized.default_amount = String(Math.round(da));
+  }
+  if (normalized.minimum_custom_amount !== undefined) {
+    const ma = Number(normalized.minimum_custom_amount);
+    if (!Number.isFinite(ma) || ma <= 0) throw new Error('minimum_custom_amount must be a positive number');
+    normalized.minimum_custom_amount = String(Math.round(ma));
+  }
+  if (normalized.amount !== undefined) {
+    const am = Number(normalized.amount);
+    if (!Number.isFinite(am) || am <= 0) throw new Error('amount must be a positive number');
+    normalized.amount = String(Math.round(am));
+    // Keep default_amount in sync when in fixed mode and admin edits legacy amount field
+    if (!normalized.default_amount && data.settings.payment_mode !== 'custom') {
+      normalized.default_amount = normalized.amount;
+    }
+  }
+  // Also handle legacy amount fallback
+  data.settings = Object.assign({}, data.settings, normalized);
+  // Sync amount and default_amount for consistency
+  if (data.settings.default_amount && !data.settings.amount) data.settings.amount = data.settings.default_amount;
+  if (data.settings.amount && !data.settings.default_amount) data.settings.default_amount = data.settings.amount;
+  ensureDefaults(data.settings);
   saveData(data);
   return data.settings;
 }

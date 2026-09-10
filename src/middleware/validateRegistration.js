@@ -1,5 +1,8 @@
+const { isValidRasi, isValidNakshatra } = require('../utils/constants');
+
 /**
  * Validation middleware for devotee registration requests
+ * Validates Rasi/Natchathiram against centralized lists and amount via controller.
  */
 function validateRegistration(req, res, next) {
   const { name, mobile, email, address, rasi, natchathiram, gothram } = req.body || {};
@@ -36,7 +39,33 @@ function validateRegistration(req, res, next) {
     errors.push('Address must not exceed 500 characters.');
   }
 
-  // 5. Family Members (Optional, up to 4 members)
+  // 4b. Rasi / Natchathiram validation (if provided, must be from allowed lists)
+  if (rasi && !isValidRasi(rasi)) {
+    errors.push('Invalid Rasi value. Please select from the dropdown (12 Rasis).');
+  }
+  if (natchathiram && !isValidNakshatra(natchathiram)) {
+    errors.push('Invalid Natchathiram value. Please select from the 27 Nakshatras.');
+  }
+
+  // 5. Family Members (Optional, up to max_family from settings)
+  let maxFamily = 4;
+  try {
+    const { getPublicData } = require('../config/settingsManager');
+    const settings = getPublicData().settings || {};
+    const mf = parseInt(settings.max_family, 10);
+    if (Number.isFinite(mf) && mf >= 1 && mf <= 4) maxFamily = mf;
+  } catch(e) {}
+  let memberCount = 0;
+  for (let i = 1; i <= 4; i++) {
+    const memberKey = `member${i}`;
+    const member = req.body[memberKey];
+    if (member && typeof member === 'object' && !Array.isArray(member) && member.name && String(member.name).trim()) {
+      memberCount++;
+    }
+  }
+  if (memberCount > maxFamily) {
+    errors.push(`Maximum ${maxFamily} family members allowed (அதிகபட்சம் ${maxFamily} குடும்ப உறுப்பினர்கள்).`);
+  }
   for (let i = 1; i <= 4; i++) {
     const memberKey = `member${i}`;
     const member = req.body[memberKey];
@@ -48,6 +77,16 @@ function validateRegistration(req, res, next) {
         errors.push(`Family member ${i} name is required if member is added.`);
       } else if (member.name.trim().length > 100) {
         errors.push(`Family member ${i} name must not exceed 100 characters.`);
+      } else {
+        if (member.rasi && !isValidRasi(member.rasi)) {
+          errors.push(`Family member ${i} has invalid Rasi.`);
+        }
+        if (member.natchathiram && !isValidNakshatra(member.natchathiram)) {
+          errors.push(`Family member ${i} has invalid Natchathiram.`);
+        }
+        if (member.gothram && typeof member.gothram === 'string' && member.gothram.length > 100) {
+          errors.push(`Family member ${i} Gothram too long.`);
+        }
       }
     }
   }

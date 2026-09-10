@@ -95,7 +95,7 @@ async function runMockFlowTest() {
     const lookupData = await lookupRes.json();
     assert.strictEqual(lookupRes.status, 200);
     assert.strictEqual(lookupData.registration.name, 'Karthik Raja');
-    assert.strictEqual(lookupData.registration.payment_status, 'paid');
+    assert.strictEqual(String(lookupData.registration.payment_status).toUpperCase(), 'PAID');
     assert.strictEqual(lookupData.registration.members.length, 1);
     assert.strictEqual(lookupData.registration.members[0].name, 'Anitha');
     console.log(`     ✅ Devotee & family member details verified in mock database!`);

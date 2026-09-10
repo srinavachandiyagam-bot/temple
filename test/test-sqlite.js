@@ -85,7 +85,7 @@ async function runSqliteTests() {
     const dbCheck = await query('SELECT * FROM registrations WHERE registration_id = $1', [registrationId]);
     assert.strictEqual(dbCheck.rows.length, 1);
     assert.strictEqual(dbCheck.rows[0].name, 'Venkatesh Kumar');
-    assert.strictEqual(dbCheck.rows[0].payment_status, 'pending');
+    assert.strictEqual(String(dbCheck.rows[0].payment_status).toUpperCase(), 'PENDING');
     assert.strictEqual(Number(dbCheck.rows[0].amount), 1000);
 
     const membersCheck = await query('SELECT * FROM registration_members WHERE registration_id = $1 ORDER BY member_number ASC', [dbCheck.rows[0].id]);

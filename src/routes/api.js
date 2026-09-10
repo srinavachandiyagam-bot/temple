@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 
 const validateRegistration = require('../middleware/validateRegistration');
-const { registerDevotee } = require('../controllers/registrationController');
+const { registerDevotee, retryPayment } = require('../controllers/registrationController');
 const { verifyPayment, handleWebhook } = require('../controllers/paymentController');
 const { query } = require('../config/db');
 const { getCashfreeOrder } = require('../config/cashfree');
+const { normalizeStatus } = require('../utils/constants');
 const { loginAdmin, loginWithCredentials, requireAdminAuth, requireSuperAdminAuth } = require('../middleware/auth');
 const { listAdmins, createAdmin, deleteAdmin } = require('../config/adminUserManager');
 const {
@@ -28,29 +29,43 @@ const { uploadImage, uploadVideo } = require('../config/uploader');
 router.post('/register', validateRegistration, registerDevotee);
 router.get('/cashfree/verify', verifyPayment);
 router.post('/cashfree/webhook', handleWebhook);
+// Payment retry endpoints (public – no re-entering form)
+router.post('/register/retry', retryPayment);
+router.post('/cashfree/retry', retryPayment);
+router.post('/registrations/:id/retry', retryPayment);
 
 // Public website content & settings
 router.get('/public', (req, res) => {
   res.json(getPublicData());
 });
 
-// Devotee registration lookup by Registration ID
+// Devotee registration lookup by Registration ID (also supports order_id for retry flow)
 router.get('/registrations/:id', async (req, res, next) => {
   try {
-    const regId = req.params.id;
-    const regResult = await query(
+    const regId = String(req.params.id).trim();
+    let regResult = await query(
       `SELECT id, registration_id, name, mobile, email, address,
-              rasi, natchathiram, gothram, payment_status, amount, created_at
+              rasi, natchathiram, gothram, payment_status, amount, created_at, cashfree_order_id, cf_order_id, order_id, payment_id, payment_method, payment_time, bank_reference, payment_message
        FROM registrations
        WHERE registration_id = $1`,
       [regId]
     );
+    if (regResult.rows.length === 0) {
+      regResult = await query(`SELECT id, registration_id, name, mobile, email, address, rasi, natchathiram, gothram, payment_status, amount, created_at, cashfree_order_id, cf_order_id, order_id, payment_id, payment_method, payment_time, bank_reference, payment_message FROM registrations WHERE cashfree_order_id = $1`, [regId]);
+    }
+    if (regResult.rows.length === 0) {
+      regResult = await query(`SELECT id, registration_id, name, mobile, email, address, rasi, natchathiram, gothram, payment_status, amount, created_at, cashfree_order_id, cf_order_id, order_id, payment_id, payment_method, payment_time, bank_reference, payment_message FROM registrations WHERE order_id = $1`, [regId]);
+    }
 
     if (regResult.rows.length === 0) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
     const registration = regResult.rows[0];
+    // Normalize for frontend
+    registration.order_id = registration.cashfree_order_id || registration.order_id || registration.cf_order_id;
+    registration.cf_order_id = registration.cashfree_order_id || registration.cf_order_id;
+    registration.payment_status = normalizeStatus(registration.payment_status);
 
     const membersResult = await query(
       `SELECT member_number, name, rasi, natchathiram, gothram
@@ -61,7 +76,10 @@ router.get('/registrations/:id', async (req, res, next) => {
     );
 
     registration.members = membersResult.rows;
+    // Keep internal id hidden but provide useful alias
+    const internalId = registration.id;
     delete registration.id;
+    registration.internal_id = internalId;
 
     res.json({ success: true, registration });
   } catch (error) {
@@ -170,7 +188,8 @@ router.get('/registrations', requireAdminAuth, async (req, res, next) => {
   try {
     const regResult = await query(
       `SELECT id, registration_id, name, mobile, email, address,
-              rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+              rasi, natchathiram, gothram, payment_status, cashfree_order_id, cf_order_id, order_id,
+              payment_id, payment_method, payment_time, bank_reference, payment_message,
               amount, created_at, updated_at
        FROM registrations
        ORDER BY id DESC`
@@ -187,7 +206,9 @@ router.get('/registrations', requireAdminAuth, async (req, res, next) => {
         [reg.id]
       );
       reg.family = memResult.rows || [];
-      reg.order_id = reg.cashfree_order_id;
+      reg.order_id = reg.cashfree_order_id || reg.order_id || reg.cf_order_id;
+      reg.cf_order_id = reg.cashfree_order_id || reg.cf_order_id;
+      reg.payment_status = normalizeStatus(reg.payment_status);
     }
 
     res.json(registrations);
@@ -199,16 +220,31 @@ router.get('/registrations', requireAdminAuth, async (req, res, next) => {
 router.patch('/registrations/:id', requireAdminAuth, async (req, res, next) => {
   try {
     const id = req.params.id;
-    const { payment_status } = req.body || {};
+    const { payment_status, payment_id, payment_method, bank_reference, payment_message, amount } = req.body || {};
 
+    const sets = [];
+    const params = [];
+    let idx = 1;
     if (payment_status) {
-      await query(
-        `UPDATE registrations
-         SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
-        [payment_status, id]
-      );
+      sets.push(`payment_status = $${idx++}`);
+      params.push(normalizeStatus(payment_status));
     }
+    if (payment_id !== undefined) { sets.push(`payment_id = $${idx++}`); params.push(payment_id || null); }
+    if (payment_method !== undefined) { sets.push(`payment_method = $${idx++}`); params.push(payment_method || null); }
+    if (bank_reference !== undefined) { sets.push(`bank_reference = $${idx++}`); params.push(bank_reference || null); }
+    if (payment_message !== undefined) { sets.push(`payment_message = $${idx++}`); params.push(payment_message || null); }
+    if (amount !== undefined) {
+      const amt = Number(amount);
+      if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'Amount must be positive numeric' });
+      sets.push(`amount = $${idx++}`); params.push(Math.round(amt));
+    }
+    if (sets.length === 0) return res.json({ success: true, message: 'No fields to update' });
+    sets.push(`updated_at = CURRENT_TIMESTAMP`);
+    params.push(id);
+    await query(
+      `UPDATE registrations SET ${sets.join(', ')} WHERE id = $${idx}`,
+      params
+    );
 
     res.json({ success: true });
   } catch (err) {
@@ -223,26 +259,49 @@ router.post('/registrations/:id/sync-cashfree', requireAdminAuth, async (req, re
     if (regResult.rows.length === 0) return res.status(404).json({ error: 'Registration not found' });
 
     const reg = regResult.rows[0];
-    if (!reg.cashfree_order_id) {
+    const orderId = reg.cashfree_order_id || reg.cf_order_id || reg.order_id;
+    if (!orderId) {
       return res.status(400).json({ error: 'Registration has no cashfree_order_id' });
     }
 
-    const cfOrder = await getCashfreeOrder(reg.cashfree_order_id);
+    const cfOrder = await getCashfreeOrder(orderId);
     const cfStatus = (cfOrder.order_status || '').toUpperCase();
-    let newStatus = reg.payment_status;
+    let newStatus = normalizeStatus(reg.payment_status);
+    const prevStatus = newStatus;
 
-    if (cfStatus === 'PAID') newStatus = 'paid';
-    else if (cfStatus === 'ACTIVE') newStatus = 'pending';
-    else if (['TERMINATED', 'EXPIRED', 'FAILED'].includes(cfStatus)) newStatus = 'failed';
+    if (cfStatus === 'PAID') newStatus = 'PAID';
+    else if (cfStatus === 'ACTIVE') newStatus = 'PENDING';
+    else if (cfStatus === 'EXPIRED') newStatus = 'EXPIRED';
+    else if (['TERMINATED','CANCELLED'].includes(cfStatus)) newStatus = 'CANCELLED';
+    else if (cfStatus === 'FAILED') newStatus = 'FAILED';
+    else if (cfStatus === 'CREATED') newStatus = 'CREATED';
 
-    await query(
-      `UPDATE registrations
-       SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [newStatus, id]
-    );
+    // Extract payment details if PAID
+    let paymentId = null, paymentMethod = null, bankRef = null, paymentTime = null;
+    if (newStatus === 'PAID') {
+      paymentId = cfOrder.cf_payment_id || cfOrder.payment_id || (cfOrder.payments && cfOrder.payments[0] && cfOrder.payments[0].cf_payment_id) || null;
+      paymentMethod = cfOrder.payment_method || cfOrder.payment_group || (cfOrder.payments && cfOrder.payments[0] && cfOrder.payments[0].payment_group) || null;
+      bankRef = cfOrder.bank_reference || (cfOrder.payments && cfOrder.payments[0] && cfOrder.payments[0].bank_reference) || null;
+      paymentTime = cfOrder.payment_time || cfOrder.payments && cfOrder.payments[0] && cfOrder.payments[0].payment_time ? new Date(cfOrder.payments[0].payment_time) : new Date();
+    }
 
-    res.json({ success: true, status: newStatus });
+    if (newStatus === 'PAID') {
+      await query(
+        `UPDATE registrations
+         SET payment_status = $1, payment_id = COALESCE($2, payment_id), payment_method = COALESCE($3, payment_method), bank_reference = COALESCE($4, bank_reference), payment_time = COALESCE($5, payment_time), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $6`,
+        [newStatus, paymentId, paymentMethod, bankRef, paymentTime, id]
+      );
+    } else {
+      await query(
+        `UPDATE registrations
+         SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [newStatus, id]
+      );
+    }
+
+    res.json({ success: true, status: newStatus, previous: prevStatus, cfStatus });
   } catch (err) {
     next(err);
   }
@@ -253,8 +312,9 @@ router.get('/export.csv', async (req, res, next) => {
   try {
     const regResult = await query(
       `SELECT id, registration_id, name, mobile, email, address,
-              rasi, natchathiram, gothram, payment_status, cashfree_order_id,
-              amount, created_at
+              rasi, natchathiram, gothram, payment_status, cashfree_order_id, cf_order_id, order_id,
+              payment_id, payment_method, payment_time, bank_reference, payment_message,
+              amount, created_at, updated_at
        FROM registrations
        ORDER BY id DESC`
     );
@@ -273,7 +333,14 @@ router.get('/export.csv', async (req, res, next) => {
         'Payment Status',
         'Amount',
         'Order ID',
+        'CF Order ID',
+        'Payment ID',
+        'Payment Method',
+        'Payment Time',
+        'Bank Reference',
+        'Payment Message',
         'Created At',
+        'Updated At',
         'Family Members'
       ]
     ];
@@ -301,10 +368,17 @@ router.get('/export.csv', async (req, res, next) => {
         r.rasi || '',
         r.natchathiram || '',
         r.gothram || '',
-        r.payment_status,
+        normalizeStatus(r.payment_status),
         r.amount,
-        r.cashfree_order_id || '',
+        r.cashfree_order_id || r.order_id || '',
+        r.cf_order_id || r.cashfree_order_id || '',
+        r.payment_id || '',
+        r.payment_method || '',
+        r.payment_time ? new Date(r.payment_time).toISOString() : '',
+        r.bank_reference || '',
+        r.payment_message ? r.payment_message.replace(/(\r\n|\n|\r)/gm, ' ') : '',
         new Date(r.created_at).toISOString(),
+        r.updated_at ? new Date(r.updated_at).toISOString() : '',
         familyStr
       ]);
     }
@@ -321,20 +395,45 @@ router.get('/export.csv', async (req, res, next) => {
   }
 });
 
-// Admin Dashboard Summary
+// Admin Dashboard Summary – handles both SQLite and Postgres, uppercase statuses
 router.get('/admin/summary', async (req, res, next) => {
   try {
-    const statsResult = await query(`
-      SELECT 
-        COUNT(*) as total_registrations,
-        COUNT(*) FILTER (WHERE payment_status = 'paid') as paid_registrations,
-        COUNT(*) FILTER (WHERE payment_status = 'pending' OR payment_status = 'pending_payment') as pending_registrations,
-        COUNT(*) FILTER (WHERE payment_status = 'failed') as failed_registrations,
-        COALESCE(SUM(amount) FILTER (WHERE payment_status = 'paid'), 0) as total_collected
-      FROM registrations
-    `);
-
-    res.json({ success: true, stats: statsResult.rows[0] });
+    const { isSqlite, isMockMode } = require('../config/db');
+    let statsResult;
+    if (isSqlite || isMockMode) {
+      // SQLite / Mock – use CASE without FILTER
+      statsResult = await query(`
+        SELECT
+          COUNT(*) as total_registrations,
+          SUM(CASE WHEN UPPER(payment_status) = 'PAID' THEN 1 ELSE 0 END) as paid_registrations,
+          SUM(CASE WHEN UPPER(payment_status) IN ('PENDING','CREATED','PENDING_PAYMENT') THEN 1 ELSE 0 END) as pending_registrations,
+          SUM(CASE WHEN UPPER(payment_status) = 'FAILED' THEN 1 ELSE 0 END) as failed_registrations,
+          SUM(CASE WHEN UPPER(payment_status) = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled_registrations,
+          SUM(CASE WHEN UPPER(payment_status) = 'EXPIRED' THEN 1 ELSE 0 END) as expired_registrations,
+          COALESCE(SUM(CASE WHEN UPPER(payment_status) = 'PAID' THEN amount ELSE 0 END), 0) as total_collected
+        FROM registrations
+      `);
+    } else {
+      statsResult = await query(`
+        SELECT
+          COUNT(*) as total_registrations,
+          COUNT(*) FILTER (WHERE UPPER(payment_status) = 'PAID') as paid_registrations,
+          COUNT(*) FILTER (WHERE UPPER(payment_status) IN ('PENDING','CREATED','PENDING_PAYMENT')) as pending_registrations,
+          COUNT(*) FILTER (WHERE UPPER(payment_status) = 'FAILED') as failed_registrations,
+          COUNT(*) FILTER (WHERE UPPER(payment_status) = 'CANCELLED') as cancelled_registrations,
+          COUNT(*) FILTER (WHERE UPPER(payment_status) = 'EXPIRED') as expired_registrations,
+          COALESCE(SUM(amount) FILTER (WHERE UPPER(payment_status) = 'PAID'), 0) as total_collected
+        FROM registrations
+      `);
+    }
+    const stats = statsResult.rows[0];
+    // Normalize to strings for frontend compatibility but keep numbers where needed
+    stats.paid_registrations = String(stats.paid_registrations || 0);
+    stats.pending_registrations = String(stats.pending_registrations || 0);
+    stats.failed_registrations = String(stats.failed_registrations || 0);
+    stats.total_registrations = String(stats.total_registrations || 0);
+    stats.total_collected = String(stats.total_collected || 0);
+    res.json({ success: true, stats });
   } catch (error) {
     next(error);
   }
@@ -431,15 +530,16 @@ router.get('/mock/order-info', async (req, res) => {
     if (!orderId) return res.status(400).json({ error: 'Missing order_id' });
 
     const result = await query(
-      'SELECT registration_id, name, mobile, amount, payment_status, cashfree_order_id FROM registrations WHERE cashfree_order_id = $1',
+      'SELECT registration_id, name, mobile, amount, payment_status, cashfree_order_id, cf_order_id, order_id, payment_id FROM registrations WHERE cashfree_order_id = $1',
       [orderId]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Order not found' });
     }
-
-    res.json({ success: true, order: result.rows[0] });
+    const order = result.rows[0];
+    order.payment_status = normalizeStatus(order.payment_status);
+    res.json({ success: true, order });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -450,21 +550,29 @@ router.post('/mock/pay', async (req, res) => {
     const { order_id, status } = req.body || {};
     if (!order_id) return res.status(400).json({ error: 'Missing order_id' });
 
-    const targetStatus = (status || 'paid').toLowerCase();
-    const cfStatus = targetStatus === 'paid' ? 'PAID' : 'FAILED';
-    const dbStatus = targetStatus === 'paid' ? 'paid' : 'failed';
+    const targetStatus = normalizeStatus(status || 'PAID');
+    const cfStatus = targetStatus === 'PAID' ? 'PAID' : (targetStatus === 'CANCELLED' ? 'CANCELLED' : (targetStatus === 'EXPIRED' ? 'EXPIRED' : 'FAILED'));
+    const dbStatus = targetStatus; // Keep uppercase
 
     const { setMockOrderStatus } = require('../config/cashfree');
     setMockOrderStatus(order_id, cfStatus);
 
-    await query(
-      'UPDATE registrations SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE cashfree_order_id = $2',
-      [dbStatus, order_id]
-    );
+    if (dbStatus === 'PAID') {
+      await query(
+        'UPDATE registrations SET payment_status = $1, payment_id = $2, payment_time = $3, payment_message = $4, updated_at = CURRENT_TIMESTAMP WHERE cashfree_order_id = $5',
+        [dbStatus, 'mock_pay_' + Date.now(), new Date(), 'Mock payment PAID', order_id]
+      );
+    } else {
+      await query(
+        'UPDATE registrations SET payment_status = $1, payment_message = $2, updated_at = CURRENT_TIMESTAMP WHERE cashfree_order_id = $3',
+        [dbStatus, `Mock payment ${dbStatus}`, order_id]
+      );
+    }
 
     res.json({
       success: true,
-      status: targetStatus,
+      status: dbStatus.toLowerCase(),
+      payment_status: dbStatus,
       order_id
     });
   } catch (err) {
