@@ -18,6 +18,13 @@ CREATE TABLE IF NOT EXISTS registrations (
     cashfree_order_id VARCHAR(100) UNIQUE,
     amount NUMERIC(10, 2) NOT NULL DEFAULT 1000.00,
     donation_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    -- Soft-archive bookkeeping (auditability: rows are NEVER physically deleted).
+    -- NULL = active. Historical rows created before this column exist stay active.
+    -- archived_by_admin_id is intentionally NOT a foreign key so the audit
+    -- snapshot survives even if the archiving admin account is later removed.
+    archived_at TIMESTAMPTZ NULL,
+    archived_by_admin_id BIGINT NULL,
+    archived_by_username VARCHAR(100) NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -38,6 +45,7 @@ CREATE TABLE IF NOT EXISTS registration_members (
 CREATE INDEX IF NOT EXISTS idx_registrations_registration_id ON registrations (registration_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_cashfree_order_id ON registrations (cashfree_order_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_payment_status ON registrations (payment_status);
+CREATE INDEX IF NOT EXISTS idx_registrations_archived_at ON registrations (archived_at);
 CREATE INDEX IF NOT EXISTS idx_registrations_mobile ON registrations (mobile);
 CREATE INDEX IF NOT EXISTS idx_registration_members_registration_id ON registration_members (registration_id);
 
@@ -77,4 +85,48 @@ CREATE TABLE IF NOT EXISTS app_settings (
     setting_value TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 7. Registration Audit Log (APPEND-ONLY historical evidence).
+-- One ARCHIVED row is written per archived registration inside the same
+-- transaction that stamps archived_at. There is intentionally NO application
+-- endpoint that deletes or purges audit-log rows.
+CREATE TABLE IF NOT EXISTS registration_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    registration_db_id BIGINT NOT NULL,
+    registration_id VARCHAR(32) NOT NULL,
+    action VARCHAR(32) NOT NULL DEFAULT 'ARCHIVED',
+    actor_admin_id BIGINT NULL,
+    actor_username VARCHAR(100) NULL,
+    reason TEXT NULL,
+    snapshot_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_db_id ON registration_audit_log (registration_db_id);
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_id ON registration_audit_log (registration_id);
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_action ON registration_audit_log (action);
+
+-- 8. Database-level append-only guard for the audit log.
+-- Blocks accidental/future application SQL from running UPDATE or DELETE on
+-- registration_audit_log while still allowing INSERT and SELECT. Idempotent.
+-- NOTE: this guards application-level access only. A database owner with
+-- infrastructure-level access can still alter schema/drop the guard, which is
+-- outside application authorization.
+CREATE OR REPLACE FUNCTION prevent_registration_audit_log_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'registration_audit_log is append-only: % not allowed', TG_OP;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_registration_audit_log_no_update ON registration_audit_log;
+DROP TRIGGER IF EXISTS trg_registration_audit_log_no_delete ON registration_audit_log;
+CREATE TRIGGER trg_registration_audit_log_no_update
+BEFORE UPDATE ON registration_audit_log
+FOR EACH ROW
+EXECUTE FUNCTION prevent_registration_audit_log_mutation();
+CREATE TRIGGER trg_registration_audit_log_no_delete
+BEFORE DELETE ON registration_audit_log
+FOR EACH ROW
+EXECUTE FUNCTION prevent_registration_audit_log_mutation();
 

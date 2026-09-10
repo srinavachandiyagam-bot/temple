@@ -46,6 +46,53 @@ const PG_APP_SETTINGS_CREATE_SQL = `CREATE TABLE IF NOT EXISTS app_settings (
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`;
 
+// Soft-archive columns + append-only audit log. All idempotent: pre-existing
+// production rows keep archived_at = NULL (active). No destructive migration.
+// archived_by_admin_id is intentionally NOT a foreign key.
+const PG_ARCHIVED_AT_ALTER_SQL =
+  'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ NULL';
+const PG_ARCHIVED_BY_ID_ALTER_SQL =
+  'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS archived_by_admin_id BIGINT NULL';
+const PG_ARCHIVED_BY_USERNAME_ALTER_SQL =
+  'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS archived_by_username VARCHAR(100) NULL';
+
+const PG_AUDIT_LOG_CREATE_SQL = `CREATE TABLE IF NOT EXISTS registration_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    registration_db_id BIGINT NOT NULL,
+    registration_id VARCHAR(32) NOT NULL,
+    action VARCHAR(32) NOT NULL DEFAULT 'ARCHIVED',
+    actor_admin_id BIGINT NULL,
+    actor_username VARCHAR(100) NULL,
+    reason TEXT NULL,
+    snapshot_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`;
+const PG_AUDIT_LOG_INDEXES_SQL = `CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_db_id ON registration_audit_log (registration_db_id);
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_id ON registration_audit_log (registration_id);
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_action ON registration_audit_log (action);
+CREATE INDEX IF NOT EXISTS idx_registrations_archived_at ON registrations (archived_at)`;
+
+// Database-level append-only guard: blocks UPDATE/DELETE on the audit log
+// from any application SQL while allowing INSERT/SELECT. Idempotent.
+// (A database owner with infrastructure access could drop the guard; that is
+// outside application authorization.)
+const PG_AUDIT_GUARD_FUNCTION_SQL = `CREATE OR REPLACE FUNCTION prevent_registration_audit_log_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'registration_audit_log is append-only: % not allowed', TG_OP;
+END;
+$$ LANGUAGE plpgsql`;
+const PG_AUDIT_GUARD_TRIGGERS_SQL = `DROP TRIGGER IF EXISTS trg_registration_audit_log_no_update ON registration_audit_log;
+DROP TRIGGER IF EXISTS trg_registration_audit_log_no_delete ON registration_audit_log;
+CREATE TRIGGER trg_registration_audit_log_no_update
+BEFORE UPDATE ON registration_audit_log
+FOR EACH ROW
+EXECUTE FUNCTION prevent_registration_audit_log_mutation();
+CREATE TRIGGER trg_registration_audit_log_no_delete
+BEFORE DELETE ON registration_audit_log
+FOR EACH ROW
+EXECUTE FUNCTION prevent_registration_audit_log_mutation()`;
+
 const SQLITE_APP_SETTINGS_CREATE_SQL = `CREATE TABLE IF NOT EXISTS app_settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL,
@@ -96,6 +143,7 @@ async function initPostgres(poolInstance) {
   //  4. Explicit app_settings table (fee persistence must survive restarts)
   //  5. Full db/schema.sql for remaining objects (members, indexes, triggers)
   //  6. Re-assert critical donation ALTER after full schema (idempotent)
+  //  7. Re-assert archive columns, audit table, indexes and append-only guard
   // Any failure rejects dbReady -- never log-and-continue serving traffic.
   // Existing rows are untouched; PostgreSQL backfills donation_amount=0.
   try {
@@ -103,6 +151,12 @@ async function initPostgres(poolInstance) {
     await poolInstance.query(PG_REGISTRATIONS_CREATE_SQL);
     await poolInstance.query(PG_DONATION_ALTER_SQL);
     await poolInstance.query(PG_APP_SETTINGS_CREATE_SQL);
+    await poolInstance.query(PG_ARCHIVED_AT_ALTER_SQL);
+    await poolInstance.query(PG_ARCHIVED_BY_ID_ALTER_SQL);
+    await poolInstance.query(PG_ARCHIVED_BY_USERNAME_ALTER_SQL);
+    await poolInstance.query(PG_AUDIT_LOG_CREATE_SQL);
+    await poolInstance.query(PG_AUDIT_GUARD_FUNCTION_SQL);
+    await poolInstance.query(PG_AUDIT_GUARD_TRIGGERS_SQL);
 
     const schemaPath = path.join(__dirname, '../../db/schema.sql');
     if (!fs.existsSync(schemaPath)) {
@@ -114,6 +168,14 @@ async function initPostgres(poolInstance) {
     // Re-assert after the multi-statement batch (idempotent, separate op).
     await poolInstance.query(PG_DONATION_ALTER_SQL);
     await poolInstance.query(PG_APP_SETTINGS_CREATE_SQL);
+    // Soft-archive + audit guarantees (each a separate awaited operation).
+    await poolInstance.query(PG_ARCHIVED_AT_ALTER_SQL);
+    await poolInstance.query(PG_ARCHIVED_BY_ID_ALTER_SQL);
+    await poolInstance.query(PG_ARCHIVED_BY_USERNAME_ALTER_SQL);
+    await poolInstance.query(PG_AUDIT_LOG_CREATE_SQL);
+    await poolInstance.query(PG_AUDIT_LOG_INDEXES_SQL);
+    await poolInstance.query(PG_AUDIT_GUARD_FUNCTION_SQL);
+    await poolInstance.query(PG_AUDIT_GUARD_TRIGGERS_SQL);
 
     console.log('✅ PostgreSQL schema verified/initialized successfully.');
   } catch (err) {
@@ -185,6 +247,36 @@ function initSqliteDb() {
 
         (async () => {
           try {
+            // Migration order matters: backfill columns on pre-existing DB
+            // files FIRST, because the full schema file below references the
+            // new columns (e.g. index on archived_at) and would fail against
+            // a legacy table otherwise. Each step is a separate awaited op.
+            const existingTables = await sqliteAll(
+              dbInstance,
+              `SELECT name FROM sqlite_master WHERE type='table' AND name='registrations'`
+            );
+            if ((existingTables || []).length > 0) {
+              const preCols = await sqliteAll(dbInstance, 'PRAGMA table_info(registrations)');
+              const preNames = new Set((preCols || []).map((c) => c.name));
+              if (!preNames.has('donation_amount')) {
+                await sqliteRun(
+                  dbInstance,
+                  'ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0'
+                );
+                preNames.add('donation_amount');
+              }
+              // Nullable archive columns: historical rows keep NULL (active).
+              if (!preNames.has('archived_at')) {
+                await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN archived_at DATETIME NULL');
+              }
+              if (!preNames.has('archived_by_admin_id')) {
+                await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN archived_by_admin_id INTEGER NULL');
+              }
+              if (!preNames.has('archived_by_username')) {
+                await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN archived_by_username TEXT NULL');
+              }
+            }
+
             const schemaPath = path.join(__dirname, '../../db/schema_sqlite.sql');
             if (!fs.existsSync(schemaPath)) {
               throw new Error(`SQLite schema file missing: ${schemaPath}`);
@@ -192,16 +284,35 @@ function initSqliteDb() {
             const sql = fs.readFileSync(schemaPath, 'utf8');
             await sqliteExec(dbInstance, sql);
 
-            // Backward-compatible: ensure donation_amount on pre-existing DB files.
-            // Separate awaited operation after the multi-statement exec.
-            const cols = await sqliteAll(dbInstance, 'PRAGMA table_info(registrations)');
-            const hasDonation = (cols || []).some((c) => c.name === 'donation_amount');
-            if (!hasDonation) {
-              await sqliteRun(
-                dbInstance,
-                'ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0'
-              );
-            }
+            // Append-only audit log (separate awaited op).
+            await sqliteExec(dbInstance, `CREATE TABLE IF NOT EXISTS registration_audit_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              registration_db_id INTEGER NOT NULL,
+              registration_id TEXT NOT NULL,
+              action TEXT NOT NULL DEFAULT 'ARCHIVED',
+              actor_admin_id INTEGER NULL,
+              actor_username TEXT NULL,
+              reason TEXT NULL,
+              snapshot_json TEXT NOT NULL,
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )`);
+            await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_db_id ON registration_audit_log (registration_db_id)');
+            await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_id ON registration_audit_log (registration_id)');
+            await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registration_audit_log_action ON registration_audit_log (action)');
+            await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registrations_archived_at ON registrations (archived_at)');
+            // Database-level append-only guard (separate awaited ops, idempotent).
+            await sqliteExec(dbInstance, `CREATE TRIGGER IF NOT EXISTS trg_registration_audit_log_no_update
+              BEFORE UPDATE ON registration_audit_log
+              FOR EACH ROW
+              BEGIN
+                SELECT RAISE(ABORT, 'registration_audit_log is append-only: UPDATE not allowed');
+              END`);
+            await sqliteExec(dbInstance, `CREATE TRIGGER IF NOT EXISTS trg_registration_audit_log_no_delete
+              BEFORE DELETE ON registration_audit_log
+              FOR EACH ROW
+              BEGIN
+                SELECT RAISE(ABORT, 'registration_audit_log is append-only: DELETE not allowed');
+              END`);
 
             // Explicit app_settings guarantee (separate awaited op).
             await sqliteExec(dbInstance, SQLITE_APP_SETTINGS_CREATE_SQL);

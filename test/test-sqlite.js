@@ -172,9 +172,11 @@ async function runSqliteTests() {
     });
     assert.strictEqual(patchRes.status, 200);
 
-    // 7. Verify Admin Summary
+    // 7. Verify Admin Summary (requires admin auth)
     console.log('  7️⃣ Testing GET /api/admin/summary...');
-    const sumRes = await fetch(`${baseUrl}/api/admin/summary`);
+    const sumRes = await fetch(`${baseUrl}/api/admin/summary`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     const sumData = await sumRes.json();
     assert.strictEqual(sumRes.status, 200);
     assert.ok(Number(sumData.stats.total_registrations) >= 1);
@@ -182,9 +184,11 @@ async function runSqliteTests() {
     assert.ok(Number(sumData.stats.total_collected) >= EXPECTED_FEE);
     console.log(`     ✅ Summary: Total = ${sumData.stats.total_registrations}, Paid = ${sumData.stats.paid_registrations}, Collected = ₹${sumData.stats.total_collected}`);
 
-    // 8. Test CSV Export from SQLite
+    // 8. Test CSV Export from SQLite (requires admin auth)
     console.log('  8️⃣ Testing GET /api/export.csv...');
-    const csvRes = await fetch(`${baseUrl}/api/export.csv`);
+    const csvRes = await fetch(`${baseUrl}/api/export.csv`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     const csvText = await csvRes.text();
     assert.strictEqual(csvRes.status, 200);
     assert.ok(csvText.includes('Venkatesh Kumar'));

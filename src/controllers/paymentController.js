@@ -1,6 +1,71 @@
-const { query } = require('../config/db');
+const { query, getClient } = require('../config/db');
 const { getCashfreeOrder, verifyWebhookSignature } = require('../config/cashfree');
 const { amountsEqual } = require('../config/pricing');
+const { appendAuditEvent } = require('../config/auditLog');
+
+/**
+ * Records a Cashfree-driven payment status change together with its audit
+ * event inside one transaction. The UPDATE is conditional on the row still
+ * being unarchived AND still carrying the previously observed status, so a
+ * concurrent archive (or concurrent status change) between the earlier read
+ * and this write cannot be silently overwritten.
+ *
+ * Returns true only when exactly one row transitioned (and the audit event
+ * was appended). On rowCount === 0 nothing is mutated and no audit event is
+ * created; the transaction is rolled back as a no-op and false is returned.
+ */
+async function applyCashfreeStatusChange({ registration, newStatus, action, actorUsername, cashfreeDetails }) {
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    const updateResult = await client.query(
+      `UPDATE registrations
+       SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+         AND archived_at IS NULL
+         AND payment_status = $3`,
+      [newStatus, registration.id, registration.payment_status]
+    );
+    if (!updateResult || updateResult.rowCount !== 1) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await appendAuditEvent(
+      (text, params) => client.query(text, params),
+      {
+        registration_db_id: registration.id,
+        registration_id: registration.registration_id,
+        action,
+        actor_admin_id: null,
+        actor_username: actorUsername,
+        snapshot: Object.assign(
+          {
+            source: 'cashfree',
+            before_payment_status: registration.payment_status,
+            after_payment_status: newStatus,
+            cashfree_order_id: registration.cashfree_order_id,
+            amount: registration.amount !== undefined ? Number(registration.amount) : null,
+            donation_amount: registration.donation_amount !== undefined && registration.donation_amount !== null
+              ? Number(registration.donation_amount)
+              : 0
+          },
+          cashfreeDetails || {}
+        )
+      }
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {}
+    throw err;
+  } finally {
+    if (client && typeof client.release === 'function') {
+      try { client.release(); } catch (e) {}
+    }
+  }
+}
 
 /**
  * Looks up a registration by Cashfree order id.
@@ -9,7 +74,7 @@ const { amountsEqual } = require('../config/pricing');
 async function findRegistrationByOrderId(orderId) {
   try {
     const r = await query(
-      `SELECT id, registration_id, payment_status, cashfree_order_id, amount, donation_amount
+      `SELECT id, registration_id, payment_status, cashfree_order_id, amount, donation_amount, archived_at
        FROM registrations
        WHERE cashfree_order_id = $1`,
       [orderId]
@@ -17,7 +82,7 @@ async function findRegistrationByOrderId(orderId) {
     return r;
   } catch (err) {
     const msg = String((err && err.message) || '');
-    if (/donation_amount|no such column|undefined column/i.test(msg)) {
+    if (/donation_amount|archived_at|no such column|undefined column/i.test(msg)) {
       return query(
         `SELECT id, registration_id, payment_status, cashfree_order_id, amount
          FROM registrations
@@ -27,6 +92,16 @@ async function findRegistrationByOrderId(orderId) {
     }
     throw err;
   }
+}
+
+/**
+ * Archived rows are historical evidence: Cashfree-driven flows must never
+ * mutate them either. Report current state without changes or audit events.
+ */
+function archivedStatusResponse(registration) {
+  const dbStatus = registration.payment_status;
+  const clientStatus = dbStatus === 'paid' ? 'paid' : dbStatus === 'failed' ? 'failed' : 'pending';
+  return { status: clientStatus, registrationId: registration.registration_id };
 }
 
 /**
@@ -55,6 +130,11 @@ async function verifyPayment(req, res, next) {
     }
 
     const registration = findResult.rows[0];
+
+    // Archived rows are read-only history: report state, change nothing.
+    if (registration.archived_at) {
+      return res.json(archivedStatusResponse(registration));
+    }
 
     // 2. If already marked as paid, return paid status immediately
     if (registration.payment_status === 'paid') {
@@ -103,15 +183,20 @@ async function verifyPayment(req, res, next) {
       dbStatus = 'failed';
     }
 
-    // 5. Update database if payment status changed
+    // 5. Update database if payment status changed (audited; silent if same
+    // or if the row was concurrently archived/changed: then rowCount is 0
+    // and no audit event is created).
     if (dbStatus !== registration.payment_status) {
-      await query(
-        `UPDATE registrations
-         SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
-        [dbStatus, registration.id]
-      );
-      console.log(`Updated registration ${registration.registration_id} payment_status to ${dbStatus}`);
+      const updated = await applyCashfreeStatusChange({
+        registration,
+        newStatus: dbStatus,
+        action: 'PAYMENT_VERIFIED',
+        actorUsername: 'SYSTEM:CASHFREE_VERIFY',
+        cashfreeDetails: { cashfree_order_status: cfStatus, cashfree_amount: cfOrder.order_amount }
+      });
+      if (updated) {
+        console.log(`Updated registration ${registration.registration_id} payment_status to ${dbStatus}`);
+      }
     }
 
     // 6. Return standard JSON response to frontend
@@ -164,6 +249,9 @@ async function handleWebhook(req, res, next) {
         return res.status(404).json({ error: 'Registration not found for order' });
       }
       const registration = findResult.rows[0];
+      if (registration.archived_at) {
+        return res.status(200).json({ status: 'ok', received: true });
+      }
       if (registration.payment_status === 'paid') {
         return res.status(200).json({ status: 'ok', received: true });
       }
@@ -185,21 +273,46 @@ async function handleWebhook(req, res, next) {
         );
         return res.status(200).json({ status: 'ok', received: true, verified: false, reason: 'amount_mismatch' });
       }
-      await query(
-        `UPDATE registrations
-         SET payment_status = 'paid', updated_at = CURRENT_TIMESTAMP
-         WHERE cashfree_order_id = $1`,
-        [orderId]
-      );
-      console.log(`✅ Webhook: Order ${orderId} marked as PAID`);
+      const updated = await applyCashfreeStatusChange({
+        registration,
+        newStatus: 'paid',
+        action: 'PAYMENT_WEBHOOK_UPDATE',
+        actorUsername: 'SYSTEM:CASHFREE_WEBHOOK',
+        cashfreeDetails: { webhook_payment_status: paymentStatus, cashfree_order_status: cfStatus, cashfree_amount: cfOrder.order_amount, verified: true }
+      });
+      if (updated) {
+        console.log(`✅ Webhook: Order ${orderId} marked as PAID`);
+      }
     } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
-      await query(
-        `UPDATE registrations
-         SET payment_status = 'failed', updated_at = CURRENT_TIMESTAMP
-         WHERE cashfree_order_id = $1 AND payment_status != 'paid'`,
-        [orderId]
-      );
-      console.log(`❌ Webhook: Order ${orderId} marked as FAILED`);
+      // No raw fallback UPDATE may run here: every outcome below either
+      // leaves the row untouched or goes through the audited path.
+      // - missing registration: acknowledge, mutate nothing
+      // - archived registration: acknowledge, mutate nothing, no event
+      // - already paid: never downgrade
+      // - already failed: no-op, no duplicate event
+      // - otherwise: audited PAYMENT_WEBHOOK_UPDATE transition
+      const failedLookup = await findRegistrationByOrderId(orderId);
+      const failedReg = failedLookup.rows[0];
+      if (!failedReg) {
+        console.log(`Webhook: no registration found for order ${orderId}; acknowledged without changes.`);
+      } else if (failedReg.archived_at) {
+        console.log(`Webhook: Order ${orderId} targets archived registration ${failedReg.registration_id}; acknowledged without changes.`);
+      } else if (failedReg.payment_status === 'paid') {
+        console.log(`Webhook: Order ${orderId} already paid; not downgrading.`);
+      } else if (failedReg.payment_status === 'failed') {
+        console.log(`Webhook: Order ${orderId} already failed; no duplicate event.`);
+      } else {
+        const updated = await applyCashfreeStatusChange({
+          registration: failedReg,
+          newStatus: 'failed',
+          action: 'PAYMENT_WEBHOOK_UPDATE',
+          actorUsername: 'SYSTEM:CASHFREE_WEBHOOK',
+          cashfreeDetails: { webhook_payment_status: paymentStatus }
+        });
+        if (updated) {
+          console.log(`❌ Webhook: Order ${orderId} marked as FAILED`);
+        }
+      }
     }
 
     // Cashfree expects a 200 OK response
@@ -213,5 +326,6 @@ async function handleWebhook(req, res, next) {
 
 module.exports = {
   verifyPayment,
-  handleWebhook
+  handleWebhook,
+  applyCashfreeStatusChange
 };

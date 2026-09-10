@@ -2,6 +2,7 @@ const db = require('../config/db');
 const { createCashfreeOrder, CASHFREE_ENV } = require('../config/cashfree');
 const { generateRegistrationId, generateCashfreeOrderId } = require('../utils/idGenerator');
 const { calculatePaymentAmounts } = require('../config/pricing');
+const { appendAuditEvent } = require('../config/auditLog');
 
 /**
  * Controller to handle devotee registration and Cashfree payment order creation
@@ -91,7 +92,40 @@ async function registerDevotee(req, res, next) {
       }
     }
 
-    // 6. Create payment order with Cashfree Orders API
+    // 6. Append the CREATED audit event inside the same transaction, after
+    // the registration, family rows and cashfree_order_id are known but
+    // BEFORE COMMIT. If payment-order creation fails below, ROLLBACK removes
+    // this event too. No backfill is done for historical rows that predate
+    // the audit system; they remain valid without a CREATED event.
+    await appendAuditEvent(
+      (text, params) => client.query(text, params),
+      {
+        registration_db_id: createdRegistration.id,
+        registration_id: registrationId,
+        action: 'CREATED',
+        actor_admin_id: null,
+        actor_username: 'SYSTEM:PARTICIPANT',
+        snapshot: {
+          source: 'participant_registration',
+          registration_id: registrationId,
+          name,
+          mobile,
+          email,
+          address,
+          rasi,
+          natchathiram,
+          gothram,
+          family_members: members || [],
+          registration_fee: registrationFee,
+          donation_amount: donation,
+          total_amount: amount,
+          cashfree_order_id: cashfreeOrderId,
+          initial_payment_status: 'pending'
+        }
+      }
+    );
+
+    // 7. Create payment order with Cashfree Orders API
     let cashfreeOrder;
     try {
       cashfreeOrder = await createCashfreeOrder({
@@ -115,10 +149,10 @@ async function registerDevotee(req, res, next) {
       });
     }
 
-    // 7. Commit database transaction
+    // 8. Commit database transaction
     await client.query('COMMIT');
 
-    // 8. Return payment session and order details to frontend
+    // 9. Return payment session and order details to frontend
     // Server response is authoritative if frontend preview differs.
     return res.status(201).json({
       success: true,

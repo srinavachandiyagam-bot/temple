@@ -137,9 +137,18 @@ async function runMockFlowTest() {
     assert.strictEqual(lookupData.registration.members[0].name, 'Anitha');
     console.log(`     ✅ Devotee & family member details verified in mock database!`);
 
-    // 7. Admin Summary
+    // 7. Admin Summary (requires admin auth)
     console.log('  7️⃣ Testing GET /api/admin/summary...');
-    const sumRes = await fetch(`${baseUrl}/api/admin/summary`);
+    const loginRes = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'change-this-password' })
+    });
+    const loginData = await loginRes.json();
+    assert.strictEqual(loginRes.status, 200);
+    const sumRes = await fetch(`${baseUrl}/api/admin/summary`, {
+      headers: { Authorization: `Bearer ${loginData.token}` }
+    });
     const sumData = await sumRes.json();
     assert.strictEqual(sumRes.status, 200);
     assert.strictEqual(sumData.stats.paid_registrations, '1');

@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS registrations (
     cashfree_order_id TEXT UNIQUE,
     amount REAL NOT NULL DEFAULT 1000.00,
     donation_amount REAL NOT NULL DEFAULT 0,
+    archived_at DATETIME NULL,
+    archived_by_admin_id INTEGER NULL,
+    archived_by_username TEXT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -38,6 +41,7 @@ CREATE TABLE IF NOT EXISTS registration_members (
 CREATE INDEX IF NOT EXISTS idx_registrations_registration_id ON registrations (registration_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_cashfree_order_id ON registrations (cashfree_order_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_payment_status ON registrations (payment_status);
+CREATE INDEX IF NOT EXISTS idx_registrations_archived_at ON registrations (archived_at);
 CREATE INDEX IF NOT EXISTS idx_registrations_mobile ON registrations (mobile);
 CREATE INDEX IF NOT EXISTS idx_registration_members_registration_id ON registration_members (registration_id);
 
@@ -69,4 +73,42 @@ CREATE TABLE IF NOT EXISTS app_settings (
     setting_value TEXT NOT NULL,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 7. Registration Audit Log (APPEND-ONLY historical evidence, SQLite variant:
+-- snapshot_json is TEXT containing valid JSON). No application endpoint may
+-- delete or purge audit-log rows.
+CREATE TABLE IF NOT EXISTS registration_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    registration_db_id INTEGER NOT NULL,
+    registration_id TEXT NOT NULL,
+    action TEXT NOT NULL DEFAULT 'ARCHIVED',
+    actor_admin_id INTEGER NULL,
+    actor_username TEXT NULL,
+    reason TEXT NULL,
+    snapshot_json TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_db_id ON registration_audit_log (registration_db_id);
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_registration_id ON registration_audit_log (registration_id);
+CREATE INDEX IF NOT EXISTS idx_registration_audit_log_action ON registration_audit_log (action);
+
+-- 8. Database-level append-only guard for the audit log (SQLite variant).
+-- Aborts any UPDATE or DELETE on registration_audit_log; INSERT/SELECT work.
+-- Idempotent via IF NOT EXISTS. Same DBA caveat as PostgreSQL: a database
+-- owner with infrastructure-level access can drop the guard; application
+-- authorization cannot.
+CREATE TRIGGER IF NOT EXISTS trg_registration_audit_log_no_update
+BEFORE UPDATE ON registration_audit_log
+FOR EACH ROW
+BEGIN
+    SELECT RAISE(ABORT, 'registration_audit_log is append-only: UPDATE not allowed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_registration_audit_log_no_delete
+BEFORE DELETE ON registration_audit_log
+FOR EACH ROW
+BEGIN
+    SELECT RAISE(ABORT, 'registration_audit_log is append-only: DELETE not allowed');
+END;
 

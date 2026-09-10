@@ -95,8 +95,13 @@ async function runAdminTests() {
     assert.ok(Array.isArray(regsData));
     console.log('  ✅ Passed: GET /api/registrations returns registrations list');
 
-    // 9. Test CSV Export
-    const csvRes = await fetch(`${baseUrl}/api/export.csv`);
+    // 9. Test CSV Export (requires admin auth; PII must never be public)
+    const unauthCsvRes = await fetch(`${baseUrl}/api/export.csv`);
+    assert.strictEqual(unauthCsvRes.status, 401);
+    console.log('  ✅ Passed: GET /api/export.csv without auth rejected with 401');
+    const csvRes = await fetch(`${baseUrl}/api/export.csv`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     const csvText = await csvRes.text();
     assert.strictEqual(csvRes.status, 200);
     assert.ok(csvText.includes('Registration ID'));
