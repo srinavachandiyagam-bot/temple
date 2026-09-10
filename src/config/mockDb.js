@@ -8,6 +8,7 @@ class MockDatabase {
     this.registrations = [];
     this.members = [];
     this.adminUsers = [];
+    this.appSettings = new Map();
     this.nextRegId = 1;
     this.nextMemberId = 1;
     this.nextAdminId = 1;
@@ -17,6 +18,7 @@ class MockDatabase {
     this.registrations = [];
     this.members = [];
     this.adminUsers = [];
+    this.appSettings = new Map();
     this.nextRegId = 1;
     this.nextMemberId = 1;
     this.nextAdminId = 1;
@@ -242,6 +244,31 @@ class MockDatabase {
         return { rows: [], rowCount: 1 };
       }
       return { rows: [], rowCount: 0 };
+    }
+
+    // 19. app_settings (degraded SQLite-unavailable fallback; mock-mode fee
+    // path never queries the DB, so this only affects non-mock processes
+    // whose sqlite native binary failed to load).
+    if (/CREATE TABLE IF NOT EXISTS app_settings/i.test(normalized)) {
+      return { rows: [], rowCount: 0 };
+    }
+
+    if (/SELECT setting_value FROM app_settings WHERE setting_key = \$1/i.test(normalized)) {
+      const key = params[0];
+      if (this.appSettings.has(key)) {
+        return { rows: [{ setting_value: this.appSettings.get(key) }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+
+    if (/^INSERT INTO app_settings/i.test(normalized)) {
+      const [key, value] = params;
+      const isDoNothing = /ON CONFLICT.*DO NOTHING/i.test(normalized);
+      if (isDoNothing && this.appSettings.has(key)) {
+        return { rows: [], rowCount: 0 };
+      }
+      this.appSettings.set(key, String(value));
+      return { rows: [], rowCount: 1 };
     }
 
     // Default for BEGIN / COMMIT / ROLLBACK

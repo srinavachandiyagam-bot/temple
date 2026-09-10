@@ -31,19 +31,29 @@ router.get('/cashfree/verify', verifyPayment);
 router.post('/cashfree/webhook', handleWebhook);
 
 // Public website content & settings
-router.get('/public', (req, res) => {
+router.get('/public', async (req, res) => {
   const data = getPublicData();
-  // Ensure public pricing cannot diverge from backend pricing:
-  // always serve the normalized registration fee from the same source.
+  // Canonical fee overlay (DB-backed when MOCK_MODE=false).
+  // DB-backed pricing failures must NOT fall back to stale settings.json:
+  // return 503 instead of exposing a potentially wrong fee.
   try {
     const { getRegistrationFee } = require('../config/pricing');
+    const canonicalFee = await getRegistrationFee();
     if (data && data.settings) {
-      data.settings.amount = String(getRegistrationFee());
+      data.settings.amount = String(canonicalFee);
     }
+    return res.json(data);
   } catch (e) {
-    // Keep stored settings if pricing helper unavailable
+    if (process.env.MOCK_MODE === 'true') {
+      // Mock reads never throw; keep file data as a safety net.
+      return res.json(data);
+    }
+    const status = (e && e.status) || 503;
+    try {
+      console.error('Failed to load canonical fee for /api/public:', (e && e.message) || e);
+    } catch (logErr) {}
+    return res.status(status).json({ error: 'Registration fee is temporarily unavailable. Please try again later.' });
   }
-  res.json(data);
 });
 
 // Devotee registration lookup by Registration ID
@@ -175,9 +185,11 @@ router.delete('/admin/users/:id', requireSuperAdminAuth, async (req, res, next) 
 // 3. ADMIN SETTINGS & CONTENT MANAGEMENT
 // ====================================================================
 
-router.post('/settings', requireAdminAuth, (req, res) => {
+router.post('/settings', requireAdminAuth, async (req, res) => {
   try {
     // Validate admin amount before it can become the live registration fee.
+    let normalizedAmount = null;
+    let hasValidAmount = false;
     if (req.body && req.body.amount !== undefined && req.body.amount !== null && String(req.body.amount).trim() !== '') {
       const { normalizeAdminAmount } = require('../config/pricing');
       const normalized = normalizeAdminAmount(req.body.amount);
@@ -185,10 +197,35 @@ router.post('/settings', requireAdminAuth, (req, res) => {
         return res.status(400).json({ error: 'Invalid Participation Amount. Enter a positive INR amount with up to 2 decimals.' });
       }
       req.body.amount = String(normalized);
+      normalizedAmount = normalized;
+      hasValidAmount = true;
     } else if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'amount')) {
       // Empty amount would make pricing fall back; reject to avoid accidental free registrations.
       return res.status(400).json({ error: 'Invalid Participation Amount. Enter a positive INR amount with up to 2 decimals.' });
     }
+
+    const isMock = process.env.MOCK_MODE === 'true';
+
+    if (hasValidAmount && !isMock) {
+      // Database-backed mode: persist registration_amount to app_settings first
+      // so it becomes immediately authoritative. Production correctness must
+      // NOT depend on settings.json.
+      try {
+        const { setStoredRegistrationFee } = require('../config/registrationFeeStore');
+        const savedFee = await setStoredRegistrationFee(normalizedAmount);
+        // Backward compatibility: ALSO write amount to settings.json below,
+        // but overlay the response with the authoritative DB fee.
+        const updated = updateSettings(req.body);
+        updated.amount = String(savedFee);
+        return res.json({ success: true, settings: updated });
+      } catch (dbErr) {
+        const status = dbErr && dbErr.status ? dbErr.status : 500;
+        return res.status(status).json({ error: (dbErr && dbErr.message) || 'Failed to persist registration fee.' });
+      }
+    }
+
+    // MOCK_MODE=true: continue file-backed behavior as before.
+    // Also used for non-amount settings updates in all modes.
     const updated = updateSettings(req.body);
     res.json({ success: true, settings: updated });
   } catch (err) {

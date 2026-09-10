@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "migrate": "node db/migrate.js",
-    "test": "node test/test-unit.js && node test/test-server.js && node test/test-mock-flow.js && node test/test-admin.js && node test/test-sqlite.js && node test/test-admin-roles.js && node test/test-pricing.js && node test/test-mock-routing.js"
+    "test": "node test/test-unit.js && node test/test-server.js && node test/test-mock-flow.js && node test/test-admin.js && node test/test-sqlite.js && node test/test-admin-roles.js && node test/test-pricing.js && node test/test-mock-routing.js && node test/test-registration-fee.js"
   },
   "engines": {
     "node": ">=18.0.0"

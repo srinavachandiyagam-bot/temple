@@ -69,3 +69,12 @@ CREATE TABLE IF NOT EXISTS admin_users (
 
 CREATE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users (username);
 
+-- 6. App Settings Table (canonical registration fee persistence)
+-- Survives Render ephemeral filesystem restarts via PostgreSQL.
+-- Only registration_amount is canonical here; other settings stay in settings.json.
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+

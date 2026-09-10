@@ -67,14 +67,14 @@ async function runPricingTests() {
   // ---- Unit: pricing helper ----
   try {
     setFeeAmount('999');
-    assert.strictEqual(pricing.getRegistrationFee(), 999);
+    assert.strictEqual(await pricing.getRegistrationFee(), 999);
     ok('Pricing helper reads admin fee 999 from settings', true);
   } catch (e) {
     ok('Pricing helper reads admin fee 999 from settings', false, e.message);
   }
 
   try {
-    const c = pricing.calculatePaymentAmounts(501);
+    const c = await pricing.calculatePaymentAmounts(501);
     assert.strictEqual(c.registrationFee, 999);
     assert.strictEqual(c.donationAmount, 501);
     assert.strictEqual(c.totalAmount, 1500);
@@ -85,7 +85,7 @@ async function runPricingTests() {
 
   try {
     setFeeAmount('999.50');
-    const c = pricing.calculatePaymentAmounts('0.50');
+    const c = await pricing.calculatePaymentAmounts('0.50');
     assert.strictEqual(c.registrationFee, 999.5);
     assert.strictEqual(c.donationAmount, 0.5);
     assert.strictEqual(c.totalAmount, 1000);

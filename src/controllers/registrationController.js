@@ -13,9 +13,10 @@ async function registerDevotee(req, res, next) {
   // Any client-sent registrationFee/amount/totalAmount is ignored.
   let pricing;
   try {
-    pricing = calculatePaymentAmounts(donationAmount);
+    pricing = await calculatePaymentAmounts(donationAmount);
   } catch (pricingErr) {
-    return res.status(400).json({ success: false, error: pricingErr.message || 'Invalid payment amounts.' });
+    const status = pricingErr.status || 500;
+    return res.status(status).json({ success: false, error: pricingErr.message || 'Invalid payment amounts.' });
   }
   const registrationFee = pricing.registrationFee;
   const donation = pricing.donationAmount;

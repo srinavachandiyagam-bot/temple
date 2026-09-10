@@ -62,3 +62,11 @@ CREATE TABLE IF NOT EXISTS admin_users (
 
 CREATE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users (username);
 
+-- 6. App Settings Table (canonical registration fee persistence)
+-- Mirrors PostgreSQL app_settings for local SQLite testing.
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+

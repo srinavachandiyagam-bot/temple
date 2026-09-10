@@ -24,6 +24,31 @@ for (const dir of requiredDirs) {
   }
 }
 
+// Ensure DB-backed registration fee is seeded early (non-mock only).
+// Pricing lookups ALSO lazily ensure seeding, so the first registration after
+// startup can never charge a different fee even if this async init is still
+// in flight. Existing DB rows are never overwritten.
+if (process.env.MOCK_MODE !== 'true') {
+  try {
+    const { ensureRegistrationFeeSeeded } = require('./config/registrationFeeStore');
+    // Defer slightly so SQLite file init in db.js has a chance to complete;
+    // ensureRegistrationFeeSeeded itself creates app_settings if needed.
+    setImmediate(() => {
+      ensureRegistrationFeeSeeded()
+        .then((fee) => {
+          if (fee !== null && fee !== undefined) {
+            console.log(`💰 Canonical registration fee ready: ₹${fee}`);
+          }
+        })
+        .catch((e) => {
+          console.warn('⚠️ Registration fee bootstrap failed (will retry lazily on pricing reads):', e.message);
+        });
+    });
+  } catch (e) {
+    console.warn('⚠️ Could not bootstrap registration fee:', e.message);
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 

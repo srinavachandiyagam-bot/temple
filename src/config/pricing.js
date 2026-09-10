@@ -4,9 +4,15 @@
  * ====================================================================
  * Single authoritative source for the registration fee + donation total.
  *
- * - Registration fee comes from the SAME admin-managed settings source
- *   used by the public website (data/settings.json -> settings.amount
- *   via settingsManager), with REGISTRATION_AMOUNT env as fallback.
+ * - MOCK_MODE=true: fee from admin settings.json (settings.amount),
+ *   with REGISTRATION_AMOUNT env as fallback (file-backed, no DB).
+ *   REGISTRATION_FEE_BOOTSTRAP is ignored in mock mode.
+ * - MOCK_MODE=false (PostgreSQL/SQLite): fee from app_settings
+ *   registration_amount row (authoritative). When the row is genuinely
+ *   absent, it is seeded once from REGISTRATION_FEE_BOOTSTRAP, then
+ *   REGISTRATION_AMOUNT env (bootstrap-only), then settings.json compat
+ *   fallback, then default. Once the row exists, env/file are ignored.
+ *   Any DB/table/query failure throws 503 (fail closed, never fallback).
  * - The frontend MUST NOT submit or override the registration fee.
  * - Only `donationAmount` is participant-controlled and is validated here.
  * - All arithmetic uses integer paise to avoid float errors
@@ -76,27 +82,48 @@ function parseFeeValue(raw) {
 
 /**
  * Canonical registration fee.
- * Order: 1) admin settings.amount 2) REGISTRATION_AMOUNT env 3) safe default.
- * Always returns a positive 2-decimal Number.
+ *
+ * MOCK_MODE=true (file-backed, no database required):
+ *   1) admin settings.amount (settings.json)
+ *   2) REGISTRATION_AMOUNT env
+ *   3) safe default
+ *
+ * DB-backed mode (MOCK_MODE=false, PostgreSQL or SQLite):
+ *   Delegates to registrationFeeStore.ensureRegistrationFeeSeeded():
+ *   1) app_settings registration_amount row (authoritative, survives restarts)
+ *   2) one-time seed ONLY when the row is genuinely absent:
+ *      REGISTRATION_FEE_BOOTSTRAP -> REGISTRATION_AMOUNT -> settings.json -> 1000
+ *
+ * Once an app_settings row exists, env/file changes must NOT overwrite it.
+ * DB/table/query failures and invalid stored rows THROW 503 (fail closed).
+ * Mock reads never throw; DB-backed reads throw instead of stale fallback.
  */
-function getRegistrationFee() {
-  // 1. Admin-managed settings (same source as public website)
-  try {
-    const { getPublicData } = require('./settingsManager');
-    const data = getPublicData();
-    const raw = data && data.settings ? data.settings.amount : undefined;
-    const parsed = parseFeeValue(raw);
-    if (parsed !== null) return parsed;
-  } catch (e) {
-    // Fall through to env/default; never throw for pricing reads
+async function getRegistrationFee() {
+  const isMock = process.env.MOCK_MODE === 'true';
+
+  if (isMock) {
+    // 1. Admin-managed settings (same source as public website)
+    try {
+      const { getPublicData } = require('./settingsManager');
+      const data = getPublicData();
+      const raw = data && data.settings ? data.settings.amount : undefined;
+      const parsed = parseFeeValue(raw);
+      if (parsed !== null) return parsed;
+    } catch (e) {
+      // Fall through to env/default; never throw for mock pricing reads
+    }
+
+    // 2. Environment fallback (REGISTRATION_FEE_BOOTSTRAP intentionally ignored in mock)
+    const envParsed = parseFeeValue(process.env.REGISTRATION_AMOUNT);
+    if (envParsed !== null) return envParsed;
+
+    // 3. Safe default
+    return DEFAULT_REGISTRATION_FEE;
   }
 
-  // 2. Environment fallback
-  const envParsed = parseFeeValue(process.env.REGISTRATION_AMOUNT);
-  if (envParsed !== null) return envParsed;
-
-  // 3. Safe default
-  return DEFAULT_REGISTRATION_FEE;
+  // DB-backed mode: authoritative store. Fail closed on any DB problem.
+  const store = require('./registrationFeeStore');
+  return store.ensureRegistrationFeeSeeded();
 }
 
 /**
@@ -132,8 +159,8 @@ function normalizeDonationAmount(raw) {
  * Calculates total using paise arithmetic.
  * Returns { registrationFee, donationAmount, totalAmount } all normalized.
  */
-function calculatePaymentAmounts(donationRaw) {
-  const registrationFee = getRegistrationFee();
+async function calculatePaymentAmounts(donationRaw) {
+  const registrationFee = await getRegistrationFee();
   const donation = normalizeDonationAmount(donationRaw);
   if (!donation.valid) {
     const err = new Error(donation.error || 'Invalid donation amount.');
