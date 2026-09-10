@@ -28,22 +28,21 @@ for (const dir of requiredDirs) {
 // Pricing lookups ALSO lazily ensure seeding, so the first registration after
 // startup can never charge a different fee even if this async init is still
 // in flight. Existing DB rows are never overwritten.
+// Background warm-up waits for dbReady first so it never races schema init.
 if (process.env.MOCK_MODE !== 'true') {
   try {
+    const dbForWarmup = require('./config/db');
     const { ensureRegistrationFeeSeeded } = require('./config/registrationFeeStore');
-    // Defer slightly so SQLite file init in db.js has a chance to complete;
-    // ensureRegistrationFeeSeeded itself creates app_settings if needed.
-    setImmediate(() => {
-      ensureRegistrationFeeSeeded()
-        .then((fee) => {
-          if (fee !== null && fee !== undefined) {
-            console.log(`💰 Canonical registration fee ready: ₹${fee}`);
-          }
-        })
-        .catch((e) => {
-          console.warn('⚠️ Registration fee bootstrap failed (will retry lazily on pricing reads):', e.message);
-        });
-    });
+    dbForWarmup.dbReady
+      .then(() => ensureRegistrationFeeSeeded())
+      .then((fee) => {
+        if (fee !== null && fee !== undefined) {
+          console.log(`💰 Canonical registration fee ready: ₹${fee}`);
+        }
+      })
+      .catch((e) => {
+        console.warn('⚠️ Registration fee bootstrap failed (will retry lazily on pricing reads):', e.message);
+      });
   } catch (e) {
     console.warn('⚠️ Could not bootstrap registration fee:', e.message);
   }
@@ -109,9 +108,34 @@ app.get('*', (req, res) => {
 // 7. Global Error Handler
 app.use(errorHandler);
 
-// Server startup handler (supports fallback port if port is occupied)
-function startServer(portToTry = process.env.PORT || 3000) {
+// Startup readiness: database schema/migrations (including the critical
+// donation_amount ALTER) must complete BEFORE the server accepts traffic.
+// app_settings fee seeding is also awaited so pricing is authoritative from
+// the first request. Existing fee rows are never overwritten (bootstrap-only).
+async function waitForStartupReadiness() {
+  const db = require('./config/db');
+  await db.waitForDatabaseReady();
+  if (process.env.MOCK_MODE !== 'true') {
+    const { ensureRegistrationFeeSeeded } = require('./config/registrationFeeStore');
+    await ensureRegistrationFeeSeeded();
+  }
+}
+
+// Server startup handler (supports fallback port if port is occupied).
+// Awaits database readiness before listening. On migration failure, logs a
+// clear error and rejects WITHOUT listening, so the process can exit
+// non-zero and Render marks the deploy failed. Never exposes DB credentials.
+async function startServer(portToTry = process.env.PORT || 3000) {
   const port = Number(portToTry);
+
+  try {
+    await waitForStartupReadiness();
+  } catch (err) {
+    console.error('❌ Database initialization failed. Server will NOT start with a half-migrated DB.');
+    console.error('⛔ Refusing to accept registration/public pricing traffic:', (err && err.message) || err);
+    throw err;
+  }
+
   const server = app.listen(port, () => {
     console.log(`====================================================`);
     console.log(`🪷 Nava Chandi Yagam Event Server is running!`);
@@ -128,7 +152,9 @@ function startServer(portToTry = process.env.PORT || 3000) {
       console.warn(`⚠️ Port ${port} is already in use.`);
       const nextPort = Number(port) + 1;
       console.log(`🔄 Trying alternative port ${nextPort}...`);
-      startServer(nextPort);
+      startServer(nextPort).catch((e) => {
+        console.error('❌ Server startup error on fallback port:', (e && e.message) || e);
+      });
     } else {
       console.error('❌ Server startup error:', err);
     }
@@ -139,8 +165,12 @@ function startServer(portToTry = process.env.PORT || 3000) {
 
 // Start server if directly executed
 if (require.main === module) {
-  startServer(Number(PORT));
+  startServer(Number(PORT)).catch((err) => {
+    console.error('❌ Fatal: server failed to start:', (err && err.message) || err);
+    process.exit(1);
+  });
 }
 
 module.exports = app;
 module.exports.startServer = startServer;
+module.exports.waitForStartupReadiness = waitForStartupReadiness;

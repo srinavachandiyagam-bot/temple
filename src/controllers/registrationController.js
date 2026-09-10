@@ -1,4 +1,4 @@
-const { getClient } = require('../config/db');
+const db = require('../config/db');
 const { createCashfreeOrder, CASHFREE_ENV } = require('../config/cashfree');
 const { generateRegistrationId, generateCashfreeOrderId } = require('../utils/idGenerator');
 const { calculatePaymentAmounts } = require('../config/pricing');
@@ -36,11 +36,16 @@ async function registerDevotee(req, res, next) {
   let client;
   try {
     // 3. Connect to Database and start transaction
-    client = await getClient();
+    client = await db.getClient();
     await client.query('BEGIN');
 
     // 4. Insert into registrations table with pending_payment status
     // amount = TOTAL charged (fee + donation) for backward compatibility.
+    // donation_amount is REQUIRED. There is intentionally NO legacy fallback
+    // retry here: once a statement fails inside a PostgreSQL transaction, the
+    // transaction is aborted (25P02) and any further INSERT in the same
+    // transaction is invalid. If the schema is missing donation_amount,
+    // fail safely via ROLLBACK + error instead of silently dropping donations.
     const insertRegQuery = `
       INSERT INTO registrations (
         registration_id, name, mobile, email, address,
@@ -50,51 +55,19 @@ async function registerDevotee(req, res, next) {
       RETURNING id, registration_id, name, mobile, payment_status, created_at;
     `;
 
-    const regResult = await (async () => {
-      try {
-        return await client.query(insertRegQuery, [
-          registrationId,
-          name,
-          mobile,
-          email,
-          address,
-          rasi,
-          natchathiram,
-          gothram,
-          cashfreeOrderId,
-          amount,
-          donation
-        ]);
-      } catch (insertErr) {
-        // Backward-compatible fallback for databases not yet migrated
-        // (missing donation_amount column): store total in amount only.
-        const msg = String((insertErr && insertErr.message) || '');
-        if (/donation_amount|no such column|undefined column/i.test(msg)) {
-          console.warn('donation_amount column missing, falling back to legacy insert (total in amount only).');
-          const legacyQuery = `
-            INSERT INTO registrations (
-              registration_id, name, mobile, email, address,
-              rasi, natchathiram, gothram, payment_status,
-              cashfree_order_id, amount
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10)
-            RETURNING id, registration_id, name, mobile, payment_status, created_at;
-          `;
-          return client.query(legacyQuery, [
-            registrationId,
-            name,
-            mobile,
-            email,
-            address,
-            rasi,
-            natchathiram,
-            gothram,
-            cashfreeOrderId,
-            amount
-          ]);
-        }
-        throw insertErr;
-      }
-    })();
+    const regResult = await client.query(insertRegQuery, [
+      registrationId,
+      name,
+      mobile,
+      email,
+      address,
+      rasi,
+      natchathiram,
+      gothram,
+      cashfreeOrderId,
+      amount,
+      donation
+    ]);
 
     const createdRegistration = regResult.rows[0];
 
