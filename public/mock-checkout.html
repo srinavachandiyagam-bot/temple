@@ -135,7 +135,11 @@
       </div>
       <div class="details-row">
         <span>கட்டணம் / Amount:</span>
-        <span id="amount">₹1,000</span>
+        <span id="amount">—</span>
+      </div>
+      <div class="details-row" id="donationRow" style="display:none">
+        <span>நன்கொடை / Donation:</span>
+        <span id="donation">—</span>
       </div>
     </div>
 
@@ -172,7 +176,16 @@
       document.getElementById('custName').textContent = o.name || 'Devotee';
       document.getElementById('regId').textContent = o.registration_id || '-';
       document.getElementById('orderIdText').textContent = o.cashfree_order_id || orderId;
-      document.getElementById('amount').textContent = '₹' + Number(o.amount || 1000).toLocaleString('en-IN');
+      // Never invent ₹1,000 for unknown amounts; show actual DB total.
+      const totalNum = Number(o.amount);
+      document.getElementById('amount').textContent = Number.isFinite(totalNum)
+        ? '₹' + totalNum.toLocaleString('en-IN')
+        : '—';
+      const donationNum = Number(o.donation_amount || 0);
+      if (Number.isFinite(donationNum) && donationNum > 0) {
+        document.getElementById('donationRow').style.display = 'flex';
+        document.getElementById('donation').textContent = '₹' + donationNum.toLocaleString('en-IN');
+      }
 
       document.getElementById('loading').style.display = 'none';
       document.getElementById('content').style.display = 'block';

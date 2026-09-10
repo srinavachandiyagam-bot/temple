@@ -19,6 +19,7 @@ const {
   deleteVideo
 } = require('../config/settingsManager');
 const { uploadImage, uploadVideo } = require('../config/uploader');
+const requireMockMode = require('../middleware/requireMockMode');
 
 // ====================================================================
 // 1. PUBLIC DEVOTEE & EVENT ENDPOINTS
@@ -31,26 +32,56 @@ router.post('/cashfree/webhook', handleWebhook);
 
 // Public website content & settings
 router.get('/public', (req, res) => {
-  res.json(getPublicData());
+  const data = getPublicData();
+  // Ensure public pricing cannot diverge from backend pricing:
+  // always serve the normalized registration fee from the same source.
+  try {
+    const { getRegistrationFee } = require('../config/pricing');
+    if (data && data.settings) {
+      data.settings.amount = String(getRegistrationFee());
+    }
+  } catch (e) {
+    // Keep stored settings if pricing helper unavailable
+  }
+  res.json(data);
 });
 
 // Devotee registration lookup by Registration ID
 router.get('/registrations/:id', async (req, res, next) => {
   try {
     const regId = req.params.id;
-    const regResult = await query(
-      `SELECT id, registration_id, name, mobile, email, address,
-              rasi, natchathiram, gothram, payment_status, amount, created_at
-       FROM registrations
-       WHERE registration_id = $1`,
-      [regId]
-    );
+    let regResult;
+    try {
+      regResult = await query(
+        `SELECT id, registration_id, name, mobile, email, address,
+                rasi, natchathiram, gothram, payment_status, amount, donation_amount, created_at
+         FROM registrations
+         WHERE registration_id = $1`,
+        [regId]
+      );
+    } catch (colErr) {
+      const msg = String((colErr && colErr.message) || '');
+      if (/donation_amount|no such column|undefined column/i.test(msg)) {
+        regResult = await query(
+          `SELECT id, registration_id, name, mobile, email, address,
+                  rasi, natchathiram, gothram, payment_status, amount, created_at
+           FROM registrations
+           WHERE registration_id = $1`,
+          [regId]
+        );
+      } else {
+        throw colErr;
+      }
+    }
 
     if (regResult.rows.length === 0) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
     const registration = regResult.rows[0];
+    if (registration.donation_amount === undefined || registration.donation_amount === null) {
+      registration.donation_amount = 0;
+    }
 
     const membersResult = await query(
       `SELECT member_number, name, rasi, natchathiram, gothram
@@ -146,6 +177,18 @@ router.delete('/admin/users/:id', requireSuperAdminAuth, async (req, res, next) 
 
 router.post('/settings', requireAdminAuth, (req, res) => {
   try {
+    // Validate admin amount before it can become the live registration fee.
+    if (req.body && req.body.amount !== undefined && req.body.amount !== null && String(req.body.amount).trim() !== '') {
+      const { normalizeAdminAmount } = require('../config/pricing');
+      const normalized = normalizeAdminAmount(req.body.amount);
+      if (normalized === null) {
+        return res.status(400).json({ error: 'Invalid Participation Amount. Enter a positive INR amount with up to 2 decimals.' });
+      }
+      req.body.amount = String(normalized);
+    } else if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'amount')) {
+      // Empty amount would make pricing fall back; reject to avoid accidental free registrations.
+      return res.status(400).json({ error: 'Invalid Participation Amount. Enter a positive INR amount with up to 2 decimals.' });
+    }
     const updated = updateSettings(req.body);
     res.json({ success: true, settings: updated });
   } catch (err) {
@@ -168,15 +211,34 @@ router.get('/cashfree/status', requireAdminAuth, (req, res) => {
 
 router.get('/registrations', requireAdminAuth, async (req, res, next) => {
   try {
-    const regResult = await query(
-      `SELECT id, registration_id, name, mobile, email, address,
-              rasi, natchathiram, gothram, payment_status, cashfree_order_id,
-              amount, created_at, updated_at
-       FROM registrations
-       ORDER BY id DESC`
-    );
+    let regResult;
+    try {
+      regResult = await query(
+        `SELECT id, registration_id, name, mobile, email, address,
+                rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+                amount, donation_amount, created_at, updated_at
+         FROM registrations
+         ORDER BY id DESC`
+      );
+    } catch (colErr) {
+      const msg = String((colErr && colErr.message) || '');
+      if (/donation_amount|no such column|undefined column/i.test(msg)) {
+        regResult = await query(
+          `SELECT id, registration_id, name, mobile, email, address,
+                  rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+                  amount, created_at, updated_at
+           FROM registrations
+           ORDER BY id DESC`
+        );
+      } else {
+        throw colErr;
+      }
+    }
 
     const registrations = regResult.rows;
+    for (const reg of registrations) {
+      if (reg.donation_amount === undefined || reg.donation_amount === null) reg.donation_amount = 0;
+    }
 
     for (const reg of registrations) {
       const memResult = await query(
@@ -229,9 +291,24 @@ router.post('/registrations/:id/sync-cashfree', requireAdminAuth, async (req, re
 
     const cfOrder = await getCashfreeOrder(reg.cashfree_order_id);
     const cfStatus = (cfOrder.order_status || '').toUpperCase();
+    const { amountsEqual } = require('../config/pricing');
     let newStatus = reg.payment_status;
 
-    if (cfStatus === 'PAID') newStatus = 'paid';
+    if (cfStatus === 'PAID') {
+      if (!amountsEqual(cfOrder.order_amount, reg.amount)) {
+        console.warn(
+          `Sync amount mismatch for order ${reg.cashfree_order_id}: cashfree=${cfOrder.order_amount} db=${reg.amount}. NOT marking paid.`
+        );
+        return res.status(409).json({
+          success: false,
+          error: 'Payment amount mismatch. Registration not marked as paid.',
+          status: reg.payment_status,
+          cashfree_amount: cfOrder.order_amount,
+          db_amount: reg.amount
+        });
+      }
+      newStatus = 'paid';
+    }
     else if (cfStatus === 'ACTIVE') newStatus = 'pending';
     else if (['TERMINATED', 'EXPIRED', 'FAILED'].includes(cfStatus)) newStatus = 'failed';
 
@@ -251,13 +328,29 @@ router.post('/registrations/:id/sync-cashfree', requireAdminAuth, async (req, re
 // CSV Export of Registrations
 router.get('/export.csv', async (req, res, next) => {
   try {
-    const regResult = await query(
-      `SELECT id, registration_id, name, mobile, email, address,
-              rasi, natchathiram, gothram, payment_status, cashfree_order_id,
-              amount, created_at
-       FROM registrations
-       ORDER BY id DESC`
-    );
+    let regResult;
+    try {
+      regResult = await query(
+        `SELECT id, registration_id, name, mobile, email, address,
+                rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+                amount, donation_amount, created_at
+         FROM registrations
+         ORDER BY id DESC`
+      );
+    } catch (colErr) {
+      const msg = String((colErr && colErr.message) || '');
+      if (/donation_amount|no such column|undefined column/i.test(msg)) {
+        regResult = await query(
+          `SELECT id, registration_id, name, mobile, email, address,
+                  rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+                  amount, created_at
+           FROM registrations
+           ORDER BY id DESC`
+        );
+      } else {
+        throw colErr;
+      }
+    }
 
     const rows = [
       [
@@ -271,7 +364,9 @@ router.get('/export.csv', async (req, res, next) => {
         'Natchathiram',
         'Gothram',
         'Payment Status',
-        'Amount',
+        'Registration Fee',
+        'Donation',
+        'Total Amount',
         'Order ID',
         'Created At',
         'Family Members'
@@ -291,6 +386,9 @@ router.get('/export.csv', async (req, res, next) => {
         .map(m => `Member ${m.member_number}: ${m.name} (${m.rasi || '-'}/${m.natchathiram || '-'}/${m.gothram || '-'})`)
         .join('; ');
 
+      const donationVal = Number(r.donation_amount || 0);
+      const totalVal = Number(r.amount || 0);
+      const feeVal = Number((totalVal - donationVal).toFixed(2));
       rows.push([
         r.id,
         r.registration_id,
@@ -302,7 +400,9 @@ router.get('/export.csv', async (req, res, next) => {
         r.natchathiram || '',
         r.gothram || '',
         r.payment_status,
-        r.amount,
+        feeVal,
+        donationVal,
+        totalVal,
         r.cashfree_order_id || '',
         new Date(r.created_at).toISOString(),
         familyStr
@@ -425,27 +525,42 @@ router.delete('/videos/:id', requireAdminAuth, (req, res) => {
 // 6. MOCK PAYMENT SIMULATOR ENDPOINTS (LOCAL TESTING)
 // ====================================================================
 
-router.get('/mock/order-info', async (req, res) => {
+router.get('/mock/order-info', requireMockMode, async (req, res) => {
   try {
     const orderId = req.query.order_id;
     if (!orderId) return res.status(400).json({ error: 'Missing order_id' });
 
-    const result = await query(
-      'SELECT registration_id, name, mobile, amount, payment_status, cashfree_order_id FROM registrations WHERE cashfree_order_id = $1',
-      [orderId]
-    );
+    let result;
+    try {
+      result = await query(
+        'SELECT registration_id, name, mobile, amount, donation_amount, payment_status, cashfree_order_id FROM registrations WHERE cashfree_order_id = $1',
+        [orderId]
+      );
+    } catch (colErr) {
+      const msg = String((colErr && colErr.message) || '');
+      if (/donation_amount|no such column|undefined column/i.test(msg)) {
+        result = await query(
+          'SELECT registration_id, name, mobile, amount, payment_status, cashfree_order_id FROM registrations WHERE cashfree_order_id = $1',
+          [orderId]
+        );
+      } else {
+        throw colErr;
+      }
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    res.json({ success: true, order: result.rows[0] });
+    const order = result.rows[0];
+    if (order.donation_amount === undefined || order.donation_amount === null) order.donation_amount = 0;
+    res.json({ success: true, order });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/mock/pay', async (req, res) => {
+router.post('/mock/pay', requireMockMode, async (req, res) => {
   try {
     const { order_id, status } = req.body || {};
     if (!order_id) return res.status(400).json({ error: 'Missing order_id' });

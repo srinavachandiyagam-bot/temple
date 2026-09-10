@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS registrations (
     payment_status TEXT NOT NULL DEFAULT 'pending',
     cashfree_order_id TEXT UNIQUE,
     amount REAL NOT NULL DEFAULT 1000.00,
+    donation_amount REAL NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

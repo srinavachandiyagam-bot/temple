@@ -70,7 +70,21 @@ function initSqlite(dbInstance) {
     dbInstance.exec(sql, (err) => {
       if (err) {
         console.error('⚠️ SQLite schema initialization error:', err.message);
+        return;
       }
+      // Backward-compatible: ensure donation_amount on pre-existing DB files
+      dbInstance.all(`PRAGMA table_info(registrations)`, (pragmaErr, cols) => {
+        if (pragmaErr) return;
+        const hasDonation = (cols || []).some((c) => c.name === 'donation_amount');
+        if (!hasDonation) {
+          dbInstance.run(
+            `ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0`,
+            (alterErr) => {
+              if (alterErr) console.error('⚠️ SQLite donation_amount auto-migration error:', alterErr.message);
+            }
+          );
+        }
+      });
     });
   }
 }
@@ -81,6 +95,9 @@ async function initPostgres(poolInstance) {
     if (fs.existsSync(schemaPath)) {
       const sql = fs.readFileSync(schemaPath, 'utf8');
       await poolInstance.query(sql);
+      await poolInstance.query(
+        `ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS donation_amount NUMERIC(10, 2) NOT NULL DEFAULT 0`
+      );
       console.log('✅ PostgreSQL schema verified/initialized successfully.');
     }
   } catch (err) {

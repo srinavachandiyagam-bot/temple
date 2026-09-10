@@ -1,5 +1,33 @@
 const { query } = require('../config/db');
 const { getCashfreeOrder, verifyWebhookSignature } = require('../config/cashfree');
+const { amountsEqual } = require('../config/pricing');
+
+/**
+ * Looks up a registration by Cashfree order id.
+ * Tolerates databases not yet migrated (missing donation_amount column).
+ */
+async function findRegistrationByOrderId(orderId) {
+  try {
+    const r = await query(
+      `SELECT id, registration_id, payment_status, cashfree_order_id, amount, donation_amount
+       FROM registrations
+       WHERE cashfree_order_id = $1`,
+      [orderId]
+    );
+    return r;
+  } catch (err) {
+    const msg = String((err && err.message) || '');
+    if (/donation_amount|no such column|undefined column/i.test(msg)) {
+      return query(
+        `SELECT id, registration_id, payment_status, cashfree_order_id, amount
+         FROM registrations
+         WHERE cashfree_order_id = $1`,
+        [orderId]
+      );
+    }
+    throw err;
+  }
+}
 
 /**
  * Verifies payment status of an order with Cashfree and updates the database
@@ -18,12 +46,7 @@ async function verifyPayment(req, res, next) {
 
   try {
     // 1. Look up registration in the database
-    const findResult = await query(
-      `SELECT id, registration_id, payment_status, cashfree_order_id, amount
-       FROM registrations
-       WHERE cashfree_order_id = $1`,
-      [orderId]
-    );
+    const findResult = await findRegistrationByOrderId(orderId);
 
     if (findResult.rows.length === 0) {
       return res.status(404).json({
@@ -58,8 +81,18 @@ async function verifyPayment(req, res, next) {
     let clientStatus = 'pending';
     let dbStatus = registration.payment_status;
 
-    // 4. Map Cashfree order_status to client status
+    // 4. Map Cashfree order_status to client status (PAID requires amount match)
     if (cfStatus === 'PAID') {
+      if (!amountsEqual(cfOrder.order_amount, registration.amount)) {
+        console.warn(
+          `Amount mismatch for order ${orderId}: cashfree=${cfOrder.order_amount} db=${registration.amount}. NOT marking paid.`
+        );
+        return res.status(409).json({
+          error: 'Payment amount mismatch. Registration not marked as paid.',
+          status: 'pending',
+          registrationId: registration.registration_id
+        });
+      }
       clientStatus = 'paid';
       dbStatus = 'paid';
     } else if (cfStatus === 'ACTIVE') {
@@ -123,6 +156,35 @@ async function handleWebhook(req, res, next) {
     }
 
     if (paymentStatus === 'SUCCESS') {
+      // Harden: locate registration + re-fetch authoritative Cashfree order
+      // and verify amounts match before marking paid. Do not trust SUCCESS alone.
+      const findResult = await findRegistrationByOrderId(orderId);
+      if (findResult.rows.length === 0) {
+        console.warn(`Webhook: no registration found for order ${orderId}`);
+        return res.status(404).json({ error: 'Registration not found for order' });
+      }
+      const registration = findResult.rows[0];
+      if (registration.payment_status === 'paid') {
+        return res.status(200).json({ status: 'ok', received: true });
+      }
+      let cfOrder;
+      try {
+        cfOrder = await getCashfreeOrder(orderId);
+      } catch (cfError) {
+        console.error(`Webhook: unable to re-fetch order ${orderId}:`, cfError.message);
+        return res.status(502).json({ error: 'Unable to verify order with payment gateway' });
+      }
+      const cfStatus = String(cfOrder.order_status || '').toUpperCase();
+      if (cfStatus !== 'PAID') {
+        console.log(`Webhook: Order ${orderId} SUCCESS received but Cashfree status is ${cfStatus}; not marking paid.`);
+        return res.status(200).json({ status: 'ok', received: true, verified: false });
+      }
+      if (!amountsEqual(cfOrder.order_amount, registration.amount)) {
+        console.warn(
+          `Webhook amount mismatch for order ${orderId}: cashfree=${cfOrder.order_amount} db=${registration.amount}. NOT marking paid.`
+        );
+        return res.status(200).json({ status: 'ok', received: true, verified: false, reason: 'amount_mismatch' });
+      }
       await query(
         `UPDATE registrations
          SET payment_status = 'paid', updated_at = CURRENT_TIMESTAMP

@@ -29,11 +29,14 @@ class MockDatabase {
     // 1. INSERT INTO registrations
     if (/^INSERT INTO registrations/i.test(normalized)) {
       const id = this.nextRegId++;
+      // Supports both legacy 10-param insert and new 11-param insert with donation_amount
       const [
         registration_id, name, mobile, email, address,
-        rasi, natchathiram, gothram, cashfree_order_id, amount
+        rasi, natchathiram, gothram, cashfree_order_id, amount,
+        donation_amount
       ] = params;
 
+      const normalizedDonation = Number(donation_amount || 0);
       const record = {
         id,
         registration_id,
@@ -47,6 +50,7 @@ class MockDatabase {
         payment_status: 'pending_payment',
         cashfree_order_id,
         amount: Number(amount || 1000),
+        donation_amount: Number.isFinite(normalizedDonation) ? normalizedDonation : 0,
         created_at: new Date(),
         updated_at: new Date()
       };

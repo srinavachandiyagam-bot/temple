@@ -6,6 +6,7 @@ const fs = require('fs');
 
 const apiRoutes = require('./routes/api');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const requireMockMode = require('./middleware/requireMockMode');
 
 // Ensure essential persistence directories exist on startup (especially for fresh Hostinger deployments)
 const requiredDirs = [
@@ -39,6 +40,16 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: true }));
+
+// 3a. Mock checkout page (mock mode only).
+// Must be BEFORE static (so /mock-checkout.html is also guarded) and BEFORE
+// the frontend catch-all (so /mock-checkout?order_id=ABC serves
+// mock-checkout.html with its query string intact, not index.html).
+// requireMockMode uses the same getIsMockMode() determination as
+// createCashfreeOrder(). Non-mock requests get 404.
+app.get(['/mock-checkout', '/mock-checkout.html'], requireMockMode, (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/mock-checkout.html'));
+});
 
 // 3. Serve frontend static assets from public/ directory
 app.use(express.static(path.join(__dirname, '../public')));
