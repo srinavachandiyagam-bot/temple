@@ -100,6 +100,22 @@ app.get(['/health', '/api/health'], (req, res) => {
 app.use('/api', apiRoutes);
 
 // 6. Serve index.html for all other frontend routes
+// 5b. Policy pages for PhonePe / payment gateway compliance (public, no auth)
+const policyPages = {
+  '/terms-and-conditions': 'terms-and-conditions.html',
+  '/privacy-policy': 'privacy-policy.html',
+  '/refund-policy': 'refund-policy.html',
+  '/shipping-policy': 'shipping-policy.html'
+};
+for (const [route, file] of Object.entries(policyPages)) {
+  app.get(route, (req, res) => {
+    res.sendFile(path.join(__dirname, '../public', file));
+  });
+  app.get(route + '.html', (req, res) => {
+    res.sendFile(path.join(__dirname, '../public', file));
+  });
+}
+
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '../public/index.html');
   res.sendFile(indexPath);
