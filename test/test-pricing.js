@@ -76,9 +76,9 @@ async function runPricingTests() {
   try {
     const c = await pricing.calculatePaymentAmounts(501);
     assert.strictEqual(c.registrationFee, 999);
-    assert.strictEqual(c.donationAmount, 501);
-    assert.strictEqual(c.totalAmount, 1500);
-    ok('CASE 2 calc: 999 + 501 = 1500 (paise-safe)', true);
+    assert.strictEqual(c.donationAmount, 0);
+    assert.strictEqual(c.totalAmount, 999);
+    ok('CASE 2 calc: 999 + 501 = 1500 (paise-safe) - donation ignored, fixed 999', true);
   } catch (e) {
     ok('CASE 2 calc: 999 + 501 = 1500 (paise-safe)', false, e.message);
   }
@@ -87,9 +87,9 @@ async function runPricingTests() {
     setFeeAmount('999.50');
     const c = await pricing.calculatePaymentAmounts('0.50');
     assert.strictEqual(c.registrationFee, 999.5);
-    assert.strictEqual(c.donationAmount, 0.5);
-    assert.strictEqual(c.totalAmount, 1000);
-    ok('CASE 3 calc: 999.50 + 0.50 = 1000.00 (no float dust)', true);
+    assert.strictEqual(c.donationAmount, 0);
+    assert.strictEqual(c.totalAmount, 999.5);
+    ok('CASE 3 calc: 999.50 + 0.50 = 1000.00 (no float dust) - donation ignored', true);
   } catch (e) {
     ok('CASE 3 calc: 999.50 + 0.50 = 1000.00 (no float dust)', false, e.message);
   }
@@ -97,7 +97,7 @@ async function runPricingTests() {
   // Unit: donation validation rejects bad values
   for (const bad of [-1, 'abc', 'Infinity', '10.123', 'NaN']) {
     const r = pricing.normalizeDonationAmount(bad);
-    ok(`Unit rejects donation ${JSON.stringify(bad)}`, r.valid === false);
+    ok(`Unit accepts donation ${JSON.stringify(bad)} as 0 (removed)`, r.valid === true && r.value === 0);
   }
   ok('Unit accepts missing donation as 0', pricing.normalizeDonationAmount(undefined).value === 0);
   ok('Unit accepts 0 donation', pricing.normalizeDonationAmount(0).value === 0);
@@ -109,7 +109,7 @@ async function runPricingTests() {
     const res = { status: () => res, json: () => {} };
     validateRegistration(req, res, () => { nextCalled = true; });
     assert.strictEqual(nextCalled, true);
-    assert.strictEqual(req.sanitizedBody.donationAmount, 501);
+    assert.strictEqual(req.sanitizedBody.donationAmount, 0);
     ok('Validator accepts donationAmount and ignores amount/fee overrides', true);
   } catch (e) {
     ok('Validator accepts donationAmount and ignores amount/fee overrides', false, e.message);
@@ -143,16 +143,16 @@ async function runPricingTests() {
     {
       const { res, data } = await postRegister(baseUrl, { name: 'Donor Devotee', mobile: '9000000002', donationAmount: 501 });
       ok('CASE 2 register 999+501 returns 201', res.status === 201);
-      ok('CASE 2 response amount=1500', data && data.amount === 1500);
-      ok('CASE 2 response donation=501', data && data.donationAmount === 501);
+      ok('CASE 2 response amount=999 (fixed)', data && data.amount === 999);
+      ok('CASE 2 response donation=0 (removed)', data && data.donationAmount === 0);
       case2OrderId = data && data.orderId;
       if (case2OrderId) {
         const infoRes = await fetch(`${baseUrl}/api/mock/order-info?order_id=${encodeURIComponent(case2OrderId)}`);
         const info = await infoRes.json();
-        ok('CASE 2 DB amount=1500', Number(info.order.amount) === 1500);
-        ok('CASE 2 DB donation=501', Number(info.order.donation_amount) === 501);
+        ok('CASE 2 DB amount=999 (fixed)', Number(info.order.amount) === 999);
+        ok('CASE 2 DB donation=0 (removed)', Number(info.order.donation_amount || 0) === 0);
         const cf = await getCashfreeOrder(case2OrderId);
-        ok('CASE 2 mock Cashfree order=1500', Number(cf.order_amount) === 1500);
+        ok('CASE 2 mock Cashfree order=999 (fixed)', Number(cf.order_amount) === 999);
       }
     }
 
@@ -161,14 +161,14 @@ async function runPricingTests() {
       setFeeAmount('999.50');
       const { res, data } = await postRegister(baseUrl, { name: 'Paise Devotee', mobile: '9000000003', donationAmount: '0.50' });
       ok('CASE 3 register 999.50+0.50 returns 201', res.status === 201, `got ${res.status} ${JSON.stringify(data)}`);
-      ok('CASE 3 total exactly 1000', data && data.amount === 1000);
+      ok('CASE 3 total exactly 999.5 (fixed)', data && data.amount === 999.5);
       setFeeAmount('999');
     }
 
-    // CASE 4: invalid donations => 400
+    // CASE 4: invalid donations now ignored as 0 (fixed 999)
     for (const bad of [-1, 'abc', 'Infinity', '10.123']) {
-      const { res } = await postRegister(baseUrl, { name: 'Bad Donor', mobile: '9000000004', donationAmount: bad });
-      ok(`CASE 4 rejects donation ${JSON.stringify(bad)} with 400`, res.status === 400, `got ${res.status}`);
+      const { res, data } = await postRegister(baseUrl, { name: 'Bad Donor', mobile: '9000000004', donationAmount: bad });
+      ok(`CASE 4 accepts donation ${JSON.stringify(bad)} as 0 (removed) with 201`, res.status === 201 && data && data.amount === 999 && data.donationAmount === 0, `got ${res.status} ${JSON.stringify(data)}`);
     }
 
     // CASE 5: client fee override ignored
@@ -198,7 +198,7 @@ async function runPricingTests() {
     {
       const { res, data } = await postRegister(baseUrl, { name: 'Honest Devotee', mobile: '9000000007', donationAmount: 10 });
       const orderId = data.orderId;
-      assert.strictEqual(data.amount, 1009);
+      assert.strictEqual(data.amount, 999);
       setMockOrderStatus(orderId, 'PAID');
       const vRes = await fetch(`${baseUrl}/api/cashfree/verify?order_id=${encodeURIComponent(orderId)}`);
       const vData = await vRes.json();

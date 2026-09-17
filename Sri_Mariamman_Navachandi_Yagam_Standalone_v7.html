@@ -181,23 +181,23 @@ async function load(){
   }
   const hero=DATA.images.find(x=>x.is_hero)||DATA.images[0];
   if(hero){
-    const hSrc = hero.filename && !hero.filename.startsWith('data:') && !IMAGE_DATA[hero.filename]
-      ? `/uploads/${encodeURIComponent(hero.filename)}`
-      : (IMAGE_DATA[hero.filename]||hero.datauri||'');
+    const hSrc = hero.url ? hero.url : (hero.filename && !hero.filename.startsWith('data:') && !String(hero.filename).startsWith('http') && !IMAGE_DATA[hero.filename]
+      ? `/uploads/${encodeURIComponent(String(hero.filename).split('/').pop())}`
+      : (IMAGE_DATA[hero.filename]||hero.datauri||hero.url||'');
     if (hSrc) $('#heroImage').src=hSrc;
     $('#heroImage').style.opacity=s.hero_opacity||'0.68';
   }
   $('#galleryGrid').innerHTML=DATA.images.map(x=>{
-    const gSrc = x.filename && !x.filename.startsWith('data:') && !IMAGE_DATA[x.filename]
-      ? `/uploads/${encodeURIComponent(x.filename)}`
+    const gSrc = x.url ? x.url : (x.filename && !x.filename.startsWith('data:') && !String(x.filename).startsWith('http') && !IMAGE_DATA[x.filename]
+      ? `/uploads/${encodeURIComponent(String(x.filename).split('/').pop())}`
       : (IMAGE_DATA[x.filename]||x.datauri||'');
     return `<img src="${gSrc}" alt="${esc(lang==='ta'?x.title_ta:x.title_en)}" loading="lazy">`;
   }).join('');
   if($('#videoGallery')) {
     $('#videoGallery').innerHTML=(DATA.videos||[]).map(x=>{
-      const vSrc = x.filename && !x.filename.startsWith('data:')
-        ? `/videos/${encodeURIComponent(x.filename)}`
-        : (x.datauri || '');
+      const vSrc = x.url ? x.url : (x.filename && !x.filename.startsWith('data:') && !String(x.filename).startsWith('http')
+        ? `/videos/${encodeURIComponent(String(x.filename).split('/').pop())}`
+        : (x.datauri || x.url || '');
       return `<figure class="videoCard"><video src="${vSrc}" controls preload="metadata" playsinline></video><figcaption>${esc(lang==='ta'?x.title_ta:x.title_en)}</figcaption></figure>`;
     }).join('');
   }

@@ -8,15 +8,32 @@ const videosDir = path.join(__dirname, '../../public/videos');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir, { recursive: true });
 
-// Image storage
-const imageStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const safeName = 'img_' + Date.now() + '_' + Math.round(Math.random() * 1e4) + ext;
-    cb(null, safeName);
-  }
-});
+// Check R2 at load time - if enabled, use memory storage so we can upload to R2
+let isR2 = false;
+try {
+  const { isR2Enabled } = require('./r2');
+  isR2 = isR2Enabled();
+  if (isR2) console.log('📦 R2 persistent storage ENABLED - uploads will go to', process.env.R2_BUCKET);
+  else console.log('📁 R2 not configured - using local disk storage (ephemeral)');
+} catch (e) {
+  isR2 = false;
+}
+
+function generateSafeName(prefix, originalname) {
+  const ext = path.extname(originalname).toLowerCase() || '';
+  return prefix + '_' + Date.now() + '_' + Math.round(Math.random() * 1e4) + ext;
+}
+
+// Image storage - memory if R2, disk otherwise
+const imageStorage = isR2
+  ? multer.memoryStorage()
+  : multer.diskStorage({
+      destination: (req, file, cb) => cb(null, uploadsDir),
+      filename: (req, file, cb) => {
+        const safeName = generateSafeName('img', file.originalname);
+        cb(null, safeName);
+      }
+    });
 
 const uploadImage = multer({
   storage: imageStorage,
@@ -31,15 +48,16 @@ const uploadImage = multer({
   }
 });
 
-// Video storage
-const videoStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, videosDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const safeName = 'vid_' + Date.now() + '_' + Math.round(Math.random() * 1e4) + ext;
-    cb(null, safeName);
-  }
-});
+// Video storage - memory if R2, disk otherwise
+const videoStorage = isR2
+  ? multer.memoryStorage()
+  : multer.diskStorage({
+      destination: (req, file, cb) => cb(null, videosDir),
+      filename: (req, file, cb) => {
+        const safeName = generateSafeName('vid', file.originalname);
+        cb(null, safeName);
+      }
+    });
 
 const uploadVideo = multer({
   storage: videoStorage,

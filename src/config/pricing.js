@@ -2,7 +2,7 @@
  * ====================================================================
  * Nava Chandi Yagam - Server-side Pricing Source
  * ====================================================================
- * Single authoritative source for the registration fee + donation total.
+ * Single authoritative source for the registration fee (FIXED ₹999, NO donation).
  *
  * - MOCK_MODE=true: fee from admin settings.json (settings.amount),
  *   with REGISTRATION_AMOUNT env as fallback (file-backed, no DB).
@@ -11,15 +11,14 @@
  *   registration_amount row (authoritative). When the row is genuinely
  *   absent, it is seeded once from REGISTRATION_FEE_BOOTSTRAP, then
  *   REGISTRATION_AMOUNT env (bootstrap-only), then settings.json compat
- *   fallback, then default. Once the row exists, env/file are ignored.
+ *   fallback, then default 999. Once the row exists, env/file are ignored.
  *   Any DB/table/query failure throws 503 (fail closed, never fallback).
  * - The frontend MUST NOT submit or override the registration fee.
- * - Only `donationAmount` is participant-controlled and is validated here.
- * - All arithmetic uses integer paise to avoid float errors
- *   (e.g. 999.50 + 0.50 must equal 1000.00 exactly).
+ * - Donation functionality REMOVED: participation is fixed ₹999 only.
+ * - All arithmetic uses integer paise to avoid float errors.
  */
 
-const DEFAULT_REGISTRATION_FEE = 1000;
+const DEFAULT_REGISTRATION_FEE = 999;
 const MAX_AMOUNT = 99999999.99;
 const MAX_PAISE = Math.round(MAX_AMOUNT * 100);
 
@@ -135,39 +134,29 @@ function normalizeAdminAmount(raw) {
 }
 
 /**
- * Normalizes participant donation.
- * missing/empty/null -> 0 (valid). 0 -> valid.
- * Otherwise must be finite, > 0, <= MAX, max 2 decimals.
+ * Normalizes participant donation - DEPRECATED: Participation is fixed at ₹999, no donation.
+ * Always returns 0 for backward compatibility; any non-zero donation is ignored.
  * Returns { valid, value, error }.
  */
 function normalizeDonationAmount(raw) {
-  if (raw === undefined || raw === null) return { valid: true, value: 0 };
-  if (typeof raw === 'string' && raw.trim() === '') return { valid: true, value: 0 };
-  if (typeof raw === 'number' && raw === 0) return { valid: true, value: 0 };
-  if (typeof raw === 'string' && raw.trim() === '0') return { valid: true, value: 0 };
-  if (typeof raw === 'string' && raw.trim() === '0.00') return { valid: true, value: 0 };
-
-  const parsed = parseMoneyValue(raw, { allowZero: true });
-  if (parsed === null) {
-    return { valid: false, value: 0, error: 'Invalid donation amount.' };
+  // Donation functionality removed: fixed ₹999 only. Always 0.
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '' && String(raw).trim() !== '0' && String(raw).trim() !== '0.00') {
+    // Silently ignore any donation attempt; log for debugging if needed
+    // Do not throw - treat as 0 to enforce fixed amount
   }
-  if (parsed === 0) return { valid: true, value: 0 };
-  return { valid: true, value: parsed };
+  return { valid: true, value: 0 };
 }
 
 /**
  * Calculates total using paise arithmetic.
- * Returns { registrationFee, donationAmount, totalAmount } all normalized.
+ * FIXED: Participation amount is ₹999 only, no donation. Total always equals fee.
+ * Returns { registrationFee, donationAmount:0, totalAmount:fee } all normalized.
  */
 async function calculatePaymentAmounts(donationRaw) {
   const registrationFee = await getRegistrationFee();
-  const donation = normalizeDonationAmount(donationRaw);
-  if (!donation.valid) {
-    const err = new Error(donation.error || 'Invalid donation amount.');
-    err.status = 400;
-    throw err;
-  }
-  const totalPaise = toPaise(registrationFee) + toPaise(donation.value);
+  // Donation removed: always 0, total = fee (₹999 fixed)
+  const donationValue = 0;
+  const totalPaise = toPaise(registrationFee);
   if (totalPaise > MAX_PAISE) {
     const err = new Error('Total amount exceeds maximum allowed.');
     err.status = 400;
@@ -175,7 +164,7 @@ async function calculatePaymentAmounts(donationRaw) {
   }
   return {
     registrationFee,
-    donationAmount: donation.value,
+    donationAmount: donationValue,
     totalAmount: fromPaise(totalPaise)
   };
 }
