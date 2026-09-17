@@ -1,7 +1,6 @@
 /**
- * Validation middleware for devotee registration requests
+ * Validation middleware for devotee registration requests - FIXED ₹999 only, no donation
  */
-const { normalizeDonationAmount } = require('../config/pricing');
 
 function validateRegistration(req, res, next) {
   const { name, mobile, email, address, rasi, natchathiram, gothram } = req.body || {};
@@ -54,17 +53,9 @@ function validateRegistration(req, res, next) {
     }
   }
 
-  // NOTE: Only `donationAmount` is participant-controlled money.
-  // registrationFee / registrationAmount / amount / totalAmount / order_amount
-  // sent by the client are NEVER trusted and are ignored (server is authority).
-  const donation = normalizeDonationAmount(req.body ? req.body.donationAmount : undefined);
-  if (!donation.valid) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid donation amount. Please enter 0 or a positive INR amount with up to 2 decimals.',
-      errors: ['Invalid donation amount. Please enter 0 or a positive INR amount with up to 2 decimals.']
-    });
-  }
+  // FIXED PARTICIPATION: ₹999 only, no donation. Any donationAmount from client is ignored and set to 0.
+  // registrationFee / donationAmount / amount / totalAmount / order_amount sent by client are NEVER trusted.
+  const donation = { valid: true, value: 0 };
 
   if (errors.length > 0) {
     return res.status(400).json({

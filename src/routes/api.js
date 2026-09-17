@@ -481,21 +481,63 @@ router.get('/admin/summary', async (req, res, next) => {
 // 5. MEDIA UPLOADS & MANAGEMENT (PHOTOS & VIDEOS)
 // ====================================================================
 
-// Upload Image
-router.post('/images', requireAdminAuth, uploadImage.single('image'), (req, res) => {
+// Upload Image - supports R2 persistent storage or local fallback
+router.post('/images', requireAdminAuth, uploadImage.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image file uploaded' });
     }
     const { title_ta, title_en, is_hero } = req.body;
+    const path = require('path');
+    let filename = req.file.filename;
+    let fileUrl = null;
+
+    // R2 path: memoryStorage provides buffer, need to upload to R2
+    try {
+      const { isR2Enabled, uploadToR2, getPublicUrl } = require('../config/r2');
+      if (isR2Enabled() && req.file.buffer) {
+        const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+        const safeName = 'img_' + Date.now() + '_' + Math.round(Math.random() * 1e4) + ext;
+        const key = `images/${safeName}`;
+        fileUrl = await uploadToR2(req.file.buffer, key, req.file.mimetype);
+        filename = safeName; // store key basename, url holds public URL
+        // also keep full key for reference
+        filename = key; // store full R2 key for deletion
+      } else if (isR2Enabled() && req.file.filename) {
+        // Rare case: disk storage but R2 enabled - migrate local file to R2 immediately
+        const fs = require('fs');
+        const fullPath = req.file.path || path.join(__dirname, '../../public/uploads', req.file.filename);
+        if (fs.existsSync(fullPath)) {
+          const buffer = fs.readFileSync(fullPath);
+          const key = `images/${req.file.filename}`;
+          fileUrl = await require('../config/r2').uploadToR2(buffer, key, req.file.mimetype);
+          filename = key;
+          // Optionally keep local file as cache, or delete after R2 upload
+        }
+      }
+    } catch (r2Err) {
+      console.error('R2 image upload failed, falling back to local:', r2Err.message);
+      // Fallback: if R2 fails, use local filename if available, else generate from buffer
+      if (!filename && req.file.buffer) {
+        const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+        filename = 'img_' + Date.now() + '_' + Math.round(Math.random() * 1e4) + ext;
+        const fs = require('fs');
+        const uploadsDir = path.join(__dirname, '../../public/uploads');
+        if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+        fs.writeFileSync(path.join(uploadsDir, filename), req.file.buffer);
+      }
+    }
+
     const img = addImage({
-      filename: req.file.filename,
+      filename: filename || req.file.filename,
       title_ta,
       title_en,
-      is_hero
+      is_hero,
+      url: fileUrl
     });
     res.json({ success: true, image: img });
   } catch (err) {
+    console.error('Image upload error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -520,20 +562,56 @@ router.delete('/images/:id', requireAdminAuth, (req, res) => {
   }
 });
 
-// Upload Video
-router.post('/videos', requireAdminAuth, uploadVideo.single('video'), (req, res) => {
+// Upload Video - supports R2 persistent storage or local fallback
+router.post('/videos', requireAdminAuth, uploadVideo.single('video'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No video file uploaded' });
     }
     const { title_ta, title_en } = req.body;
+    const path = require('path');
+    let filename = req.file.filename;
+    let fileUrl = null;
+
+    try {
+      const { isR2Enabled, uploadToR2 } = require('../config/r2');
+      if (isR2Enabled() && req.file.buffer) {
+        const ext = path.extname(req.file.originalname).toLowerCase() || '.mp4';
+        const safeName = 'vid_' + Date.now() + '_' + Math.round(Math.random() * 1e4) + ext;
+        const key = `videos/${safeName}`;
+        fileUrl = await uploadToR2(req.file.buffer, key, req.file.mimetype);
+        filename = key;
+      } else if (isR2Enabled() && req.file.filename) {
+        const fs = require('fs');
+        const fullPath = req.file.path || path.join(__dirname, '../../public/videos', req.file.filename);
+        if (fs.existsSync(fullPath)) {
+          const buffer = fs.readFileSync(fullPath);
+          const key = `videos/${req.file.filename}`;
+          fileUrl = await require('../config/r2').uploadToR2(buffer, key, req.file.mimetype);
+          filename = key;
+        }
+      }
+    } catch (r2Err) {
+      console.error('R2 video upload failed, falling back to local:', r2Err.message);
+      if (!filename && req.file.buffer) {
+        const ext = path.extname(req.file.originalname).toLowerCase() || '.mp4';
+        filename = 'vid_' + Date.now() + '_' + Math.round(Math.random() * 1e4) + ext;
+        const fs = require('fs');
+        const videosDir = path.join(__dirname, '../../public/videos');
+        if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir, { recursive: true });
+        fs.writeFileSync(path.join(videosDir, filename), req.file.buffer);
+      }
+    }
+
     const vid = addVideo({
-      filename: req.file.filename,
+      filename: filename || req.file.filename,
       title_ta,
-      title_en
+      title_en,
+      url: fileUrl
     });
     res.json({ success: true, video: vid });
   } catch (err) {
+    console.error('Video upload error:', err);
     res.status(500).json({ error: err.message });
   }
 });

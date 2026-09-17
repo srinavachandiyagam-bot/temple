@@ -8,18 +8,17 @@ const { calculatePaymentAmounts } = require('../config/pricing');
  * Endpoint: POST /api/register
  */
 async function registerDevotee(req, res, next) {
-  const { name, mobile, email, address, rasi, natchathiram, gothram, members, donationAmount } = req.sanitizedBody;
-  // Server is the authority: registration fee from admin settings, donation validated above.
-  // Any client-sent registrationFee/amount/totalAmount is ignored.
+  const { name, mobile, email, address, rasi, natchathiram, gothram, members } = req.sanitizedBody;
+  // FIXED: Participation amount is ₹999 only, no donation. Server is authoritative.
   let pricing;
   try {
-    pricing = await calculatePaymentAmounts(donationAmount);
+    pricing = await calculatePaymentAmounts(0);
   } catch (pricingErr) {
     const status = pricingErr.status || 500;
     return res.status(status).json({ success: false, error: pricingErr.message || 'Invalid payment amounts.' });
   }
   const registrationFee = pricing.registrationFee;
-  const donation = pricing.donationAmount;
+  const donation = 0;
   const amount = pricing.totalAmount;
 
   // 1. Generate unique identifiers

@@ -235,15 +235,15 @@ async function runFeePersistenceTests() {
 
     const calc = await pricing.calculatePaymentAmounts(501);
     ok('CASE 4 calc registrationFee=999', calc.registrationFee === 999, `got ${JSON.stringify(calc)}`);
-    ok('CASE 4 calc donationAmount=501', calc.donationAmount === 501, `got ${JSON.stringify(calc)}`);
-    ok('CASE 4 calc amount=1500', calc.totalAmount === 1500, `got ${JSON.stringify(calc)}`);
+    ok('CASE 4 calc donationAmount=0 (removed)', calc.donationAmount === 0, `got ${JSON.stringify(calc)}`);
+    ok('CASE 4 calc amount=999 (fixed)', calc.totalAmount === 999, `got ${JSON.stringify(calc)}`);
 
     const { res, data } = await postRegister({ name: 'Donation Persist Devotee', mobile: '9222222222', donationAmount: 501 });
     ok('CASE 4 register 999+501 returns 201', res.status === 201, `got ${res.status} ${JSON.stringify(data)}`);
-    ok('CASE 4 register response 999/501/1500', data && data.registrationFee === 999 && data.donationAmount === 501 && data.amount === 1500, `got ${JSON.stringify(data)}`);
+    ok('CASE 4 register response 999/0/999 (fixed)', data && data.registrationFee === 999 && data.donationAmount === 0 && data.amount === 999, `got ${JSON.stringify(data)}`);
     if (data && data.orderId) {
       const cf = await getCashfreeOrder(data.orderId);
-      ok('CASE 4 mock Cashfree order = 1500', Number(cf.order_amount) === 1500, `got ${JSON.stringify(cf)}`);
+      ok('CASE 4 mock Cashfree order = 999 (fixed)', Number(cf.order_amount) === 999, `got ${JSON.stringify(cf)}`);
     }
   }
 

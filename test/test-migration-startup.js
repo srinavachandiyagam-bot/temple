@@ -303,8 +303,8 @@ async function run() {
   try {
     const calc = await pricing.calculatePaymentAmounts(501);
     ok('E1 calc registrationFee=999', calc.registrationFee === 999, `got ${JSON.stringify(calc)}`);
-    ok('E2 calc donationAmount=501', calc.donationAmount === 501, `got ${JSON.stringify(calc)}`);
-    ok('E3 calc totalAmount=1500', calc.totalAmount === 1500, `got ${JSON.stringify(calc)}`);
+    ok('E2 calc donationAmount=0 (removed)', calc.donationAmount === 0, `got ${JSON.stringify(calc)}`);
+    ok('E3 calc totalAmount=999 (fixed)', calc.totalAmount === 999, `got ${JSON.stringify(calc)}`);
 
     // startServer must await readiness internally; it should resolve only
     // after migration + fee seeding.
@@ -318,16 +318,16 @@ async function run() {
     });
     const regData = await regRes.json().catch(() => null);
     ok('E5 POST /api/register 999+501 returns 201', regRes.status === 201, `got ${regRes.status} ${JSON.stringify(regData)}`);
-    ok('E6 response 999/501/1500', regData && regData.registrationFee === 999 && regData.donationAmount === 501 && regData.amount === 1500, `got ${JSON.stringify(regData)}`);
+    ok('E6 response 999/0/999 (fixed)', regData && regData.registrationFee === 999 && regData.donationAmount === 0 && regData.amount === 999, `got ${JSON.stringify(regData)}`);
 
     if (regData && regData.registrationId) {
       const dbRow = await db.query('SELECT amount, donation_amount FROM registrations WHERE registration_id = $1', [regData.registrationId]);
-      ok('E7 DB stores amount=1500', dbRow.rows.length === 1 && Number(dbRow.rows[0].amount) === 1500, `got ${JSON.stringify(dbRow.rows)}`);
-      ok('E8 DB stores donation_amount=501 (not dropped)', dbRow.rows.length === 1 && Number(dbRow.rows[0].donation_amount) === 501, `got ${JSON.stringify(dbRow.rows)}`);
+      ok('E7 DB stores amount=999 (fixed)', dbRow.rows.length === 1 && Number(dbRow.rows[0].amount) === 999, `got ${JSON.stringify(dbRow.rows)}`);
+      ok('E8 DB stores donation_amount=0 (removed)', dbRow.rows.length === 1 && Number(dbRow.rows[0].donation_amount) === 0, `got ${JSON.stringify(dbRow.rows)}`);
 
       const lookup = await fetch(`${baseUrl}/api/registrations/${encodeURIComponent(regData.registrationId)}`);
       const lookupData = await lookup.json().catch(() => null);
-      ok('E9 lookup readable with donation 501', lookup.status === 200 && Number(lookupData.registration.donation_amount) === 501, `got ${lookup.status} ${JSON.stringify(lookupData)}`);
+      ok('E9 lookup readable with donation 0 (removed)', lookup.status === 200 && Number(lookupData.registration.donation_amount) === 0, `got ${lookup.status} ${JSON.stringify(lookupData)}`);
     }
 
     const histLookup = await fetch(`${baseUrl}/api/registrations/${encodeURIComponent('NCY-OLD001')}`);

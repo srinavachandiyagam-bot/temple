@@ -35,7 +35,7 @@ function updateSettings(newSettings) {
   return data.settings;
 }
 
-function addImage({ filename, title_ta, title_en, is_hero }) {
+function addImage({ filename, title_ta, title_en, is_hero, url }) {
   const data = loadData();
   const id = Date.now();
   const isHeroNum = is_hero === '1' || is_hero === 1 ? 1 : 0;
@@ -51,6 +51,14 @@ function addImage({ filename, title_ta, title_en, is_hero }) {
     title_en: title_en || '',
     is_hero: isHeroNum
   };
+  // R2 persistent URL if provided
+  if (url) imgObj.url = url;
+  // Also support storing key as filename and public URL separately
+  // For backward compat, filename may be a full URL if caller passed R2 URL as filename
+  if (filename && filename.startsWith('http')) {
+    imgObj.url = filename;
+    imgObj.filename = filename.split('/').pop();
+  }
 
   data.images.push(imgObj);
   saveData(data);
@@ -86,18 +94,59 @@ function deleteImage(id) {
   const [removed] = data.images.splice(idx, 1);
   saveData(data);
 
-  // Attempt to remove file from public/uploads
-  if (removed && removed.filename) {
-    const filePath = path.join(__dirname, '../../public/uploads', removed.filename);
-    if (fs.existsSync(filePath)) {
-      try { fs.unlinkSync(filePath); } catch (e) { console.error('Error deleting image file:', e); }
+  // Attempt to remove persistent storage first (R2), then local fallback
+  let deleted = false;
+  if (removed) {
+    try {
+      const { isR2Enabled, deleteFromR2, getPublicUrl } = require('./r2');
+      if (isR2Enabled() && (removed.url || removed.filename)) {
+        // Derive R2 key: if url exists, extract key after bucket host; else use filename with prefix
+        let key = removed.filename;
+        if (removed.url && removed.url.startsWith('http')) {
+          try {
+            const base = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+            if (base && removed.url.startsWith(base)) {
+              key = removed.url.slice(base.length + 1);
+            } else {
+              // Fallback: try to extract after last /
+              const urlObj = new URL(removed.url);
+              key = urlObj.pathname.replace(/^\//, '');
+            }
+          } catch {}
+          // If key doesn't contain prefix, try images/ prefix
+          if (!key.includes('/')) key = `images/${key}`;
+        } else if (key && !key.includes('/')) {
+          key = `images/${key}`;
+        }
+        // Fire and forget R2 delete (don't block)
+        deleteFromR2(key).catch(() => {});
+        // Also try without prefix as fallback
+        if (key.startsWith('images/')) {
+          deleteFromR2(removed.filename).catch(() => {});
+        }
+        deleted = true;
+      }
+    } catch (e) {
+      // ignore R2 errors, fall through to local
+    }
+    // Local fallback (only if not R2 or also try local for legacy)
+    if (removed.filename) {
+      const filePath = path.join(__dirname, '../../public/uploads', removed.filename);
+      // Also try with basename if filename was a key with prefix
+      const baseName = path.basename(removed.filename);
+      const altPath = path.join(__dirname, '../../public/uploads', baseName);
+      for (const p of [filePath, altPath]) {
+        if (fs.existsSync(p)) {
+          try { fs.unlinkSync(p); } catch (e) { console.error('Error deleting image file:', e); }
+        }
+      }
     }
   }
 
   return true;
 }
 
-function addVideo({ filename, title_ta, title_en }) {
+function addVideo({ filename, title_ta, title_en, url }) {
   const data = loadData();
   const id = Date.now();
   const vidObj = {
@@ -106,6 +155,11 @@ function addVideo({ filename, title_ta, title_en }) {
     title_ta: title_ta || '',
     title_en: title_en || ''
   };
+  if (url) vidObj.url = url;
+  if (filename && filename.startsWith('http')) {
+    vidObj.url = filename;
+    vidObj.filename = filename.split('/').pop();
+  }
 
   data.videos.push(vidObj);
   saveData(data);
@@ -134,11 +188,38 @@ function deleteVideo(id) {
   const [removed] = data.videos.splice(idx, 1);
   saveData(data);
 
-  // Attempt to remove file from public/videos
-  if (removed && removed.filename) {
-    const filePath = path.join(__dirname, '../../public/videos', removed.filename);
-    if (fs.existsSync(filePath)) {
-      try { fs.unlinkSync(filePath); } catch (e) { console.error('Error deleting video file:', e); }
+  if (removed) {
+    try {
+      const { isR2Enabled, deleteFromR2 } = require('./r2');
+      if (isR2Enabled() && (removed.url || removed.filename)) {
+        let key = removed.filename;
+        if (removed.url && removed.url.startsWith('http')) {
+          try {
+            const base = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+            if (base && removed.url.startsWith(base)) {
+              key = removed.url.slice(base.length + 1);
+            } else {
+              const urlObj = new URL(removed.url);
+              key = urlObj.pathname.replace(/^\//, '');
+            }
+          } catch {}
+          if (!key.includes('/')) key = `videos/${key}`;
+        } else if (key && !key.includes('/')) {
+          key = `videos/${key}`;
+        }
+        deleteFromR2(key).catch(() => {});
+        if (key.startsWith('videos/')) deleteFromR2(removed.filename).catch(() => {});
+      }
+    } catch {}
+    if (removed.filename) {
+      const filePath = path.join(__dirname, '../../public/videos', removed.filename);
+      const baseName = path.basename(removed.filename);
+      const altPath = path.join(__dirname, '../../public/videos', baseName);
+      for (const p of [filePath, altPath]) {
+        if (fs.existsSync(p)) {
+          try { fs.unlinkSync(p); } catch (e) { console.error('Error deleting video file:', e); }
+        }
+      }
     }
   }
 

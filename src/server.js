@@ -128,12 +128,20 @@ app.use(errorHandler);
 // donation_amount ALTER) must complete BEFORE the server accepts traffic.
 // app_settings fee seeding is also awaited so pricing is authoritative from
 // the first request. Existing fee rows are never overwritten (bootstrap-only).
+// Also migrates existing local media to R2 persistent storage if configured.
 async function waitForStartupReadiness() {
   const db = require('./config/db');
   await db.waitForDatabaseReady();
   if (process.env.MOCK_MODE !== 'true') {
     const { ensureRegistrationFeeSeeded } = require('./config/registrationFeeStore');
     await ensureRegistrationFeeSeeded();
+  }
+  // Migrate local uploads to R2 if R2 is configured (non-blocking, but awaited for correctness)
+  try {
+    const { migrateLocalMediaToR2 } = require('./config/migrateMedia');
+    await migrateLocalMediaToR2();
+  } catch (e) {
+    console.warn('⚠️ Media migration check failed (non-fatal):', e.message);
   }
 }
 
