@@ -19,7 +19,7 @@
 - Event facts (do not invent beyond these): 18-10-2026, காலை 7:00, ₹1,000,
   Sri Mariamman Temple Senthampalayam/Kavindapadi/Erode-638455, sankalpam for
   well-being/health/prosperity/peace, temple-committee organised, 1+4 family per
-  registration, contacts Marimuthu/Mevi Murugan/Balaji, map URL, WhatsApp 9150232419.
+  registration, contacts Primary 9150232419 Marimuthu / 7539953653 Mevi Murugan / 6381606039 Balaji / 8838581693 Abishek Marimuthu, email srinavachandiyagam@gmail.com, map URL, WhatsApp 9150232419, footer "Website Managed by Abishek Marimuthu".
 - Gaps vs reference: no countdown, no sticky section nav, no sidebar, no process
   timeline, no FAQ, weak mobile rhythm, hero contrast issues, scattered hex values.
 
@@ -42,7 +42,7 @@ mobile sticky bottom booking bar; Noto Serif/Sans Tamil pairing.
 | About + 3 benefit cards | About (full text, no clamp needed) + meta strip (தேதி/நேரம்/பங்கேற்பு) + benefits grid reusing benefit1-3 settings keys |
 | Event details block | Folded into hero info-card + dedicated "நிகழ்வு" section with date/time/fee/venue cards + map CTA |
 | (none) | "யாக முறை" numbered timeline, 4 steps paraphrased from about text only: சங்கல்பம் / சண்டிகா வழிபாடு / நவசக்தி அருள் வேண்டல் / குடும்பத்துடன் அருள் பெறுதல் |
-| Contact/venue | "இடம்" section (address, map, organiser, 3 phone cards) |
+| Contact/venue | "இடம்" section (address, map, organiser, 4 phone cards: Primary 9150232419 + 7539953653, 6381606039, 8838581693 Abishek Marimuthu, email srinavachandiyagam@gmail.com, Website Managed by Abishek Marimuthu) |
 | (none) | "உங்களுக்கு" inclusions: family sankalpam + 4 members + contact support (numbered 01-03, grounded) |
 | Registration form | Same fields/contract, restyled: grouped fieldsets, focus/error/loading/success states, fee/total summary, donation input |
 | (none) | FAQ accordion (5 Qs answered strictly from settings: fee, family, date/venue, how to register/pay, contact) |

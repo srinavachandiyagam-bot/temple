@@ -197,12 +197,14 @@ WhatsApp target:
 The button should open WhatsApp chat with a suitable pre-filled message.
 
 ## 13. Contact section
-Display:
-- MARIMUTHU — 9150232419
+Display (Primary clearly marked, all tel: links clickable):
+- MARIMUTHU — 9150232419 — PRIMARY CONTACT
 - MEVI MURUGAN — 7539953653
 - BALAJI — 6381606039
+- Abishek Marimuthu — 8838581693
+- Email: srinavachandiyagam@gmail.com
 
-The contact section should have clickable phone links on mobile.
+The contact section should have clickable phone links on mobile. Footer must also show: "Website Managed by Abishek Marimuthu"
 
 ## 14. Map
 Use the exact Google Maps link:
