@@ -21,6 +21,12 @@ let sqliteDb = null;
 // from being attempted.
 const PG_DONATION_ALTER_SQL =
   'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS donation_amount NUMERIC(10, 2) NOT NULL DEFAULT 0';
+const PG_PHONEPE_ALTER_SQLS = [
+  'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS phonepe_merchant_order_id VARCHAR(100)',
+  'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS phonepe_order_id VARCHAR(100)',
+  'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS phonepe_transaction_id VARCHAR(100)',
+  'ALTER TABLE IF EXISTS registrations ADD COLUMN IF NOT EXISTS cashfree_order_id VARCHAR(100)'
+];
 
 const PG_REGISTRATIONS_CREATE_SQL = `CREATE TABLE IF NOT EXISTS registrations (
     id BIGSERIAL PRIMARY KEY,
@@ -34,7 +40,10 @@ const PG_REGISTRATIONS_CREATE_SQL = `CREATE TABLE IF NOT EXISTS registrations (
     gothram VARCHAR(100),
     payment_status VARCHAR(50) NOT NULL DEFAULT 'pending',
     cashfree_order_id VARCHAR(100) UNIQUE,
-    amount NUMERIC(10, 2) NOT NULL DEFAULT 1000.00,
+    phonepe_merchant_order_id VARCHAR(100) UNIQUE,
+    phonepe_order_id VARCHAR(100),
+    phonepe_transaction_id VARCHAR(100),
+    amount NUMERIC(10, 2) NOT NULL DEFAULT 999.00,
     donation_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -102,6 +111,9 @@ async function initPostgres(poolInstance) {
     await poolInstance.query('SELECT 1');
     await poolInstance.query(PG_REGISTRATIONS_CREATE_SQL);
     await poolInstance.query(PG_DONATION_ALTER_SQL);
+    for (const sql of PG_PHONEPE_ALTER_SQLS) {
+      try { await poolInstance.query(sql); } catch (e) { console.warn('⚠️ PG phonepe alter warn:', e.message); }
+    }
     await poolInstance.query(PG_APP_SETTINGS_CREATE_SQL);
 
     const schemaPath = path.join(__dirname, '../../db/schema.sql');
@@ -113,6 +125,9 @@ async function initPostgres(poolInstance) {
 
     // Re-assert after the multi-statement batch (idempotent, separate op).
     await poolInstance.query(PG_DONATION_ALTER_SQL);
+    for (const sql of PG_PHONEPE_ALTER_SQLS) {
+      try { await poolInstance.query(sql); } catch (e) {}
+    }
     await poolInstance.query(PG_APP_SETTINGS_CREATE_SQL);
 
     console.log('✅ PostgreSQL schema verified/initialized successfully.');
@@ -192,16 +207,27 @@ function initSqliteDb() {
             const sql = fs.readFileSync(schemaPath, 'utf8');
             await sqliteExec(dbInstance, sql);
 
-            // Backward-compatible: ensure donation_amount on pre-existing DB files.
-            // Separate awaited operation after the multi-statement exec.
+            // Backward-compatible: ensure phonepe/cashfree/donation columns on pre-existing DB files.
             const cols = await sqliteAll(dbInstance, 'PRAGMA table_info(registrations)');
-            const hasDonation = (cols || []).some((c) => c.name === 'donation_amount');
-            if (!hasDonation) {
-              await sqliteRun(
-                dbInstance,
-                'ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0'
-              );
+            const existing = new Set((cols || []).map(c => c.name));
+            if (!existing.has('donation_amount')) {
+              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0');
             }
+            if (!existing.has('phonepe_merchant_order_id')) {
+              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_merchant_order_id TEXT');
+            }
+            if (!existing.has('phonepe_order_id')) {
+              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_order_id TEXT');
+            }
+            if (!existing.has('phonepe_transaction_id')) {
+              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_transaction_id TEXT');
+            }
+            if (!existing.has('cashfree_order_id')) {
+              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN cashfree_order_id TEXT');
+            }
+            // Ensure indexes exist after columns are added
+            try { await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registrations_phonepe_merchant_order_id ON registrations (phonepe_merchant_order_id)'); } catch(e) {}
+            try { await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registrations_cashfree_order_id ON registrations (cashfree_order_id)'); } catch(e) {}
 
             // Explicit app_settings guarantee (separate awaited op).
             await sqliteExec(dbInstance, SQLITE_APP_SETTINGS_CREATE_SQL);

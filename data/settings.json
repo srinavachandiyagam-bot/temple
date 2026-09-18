@@ -65,9 +65,11 @@
     "require_gothram": "0",
     "registration_note_ta": "முதன்மை நபரின் விவரங்களுடன் ராசி, நட்சத்திரம், கோத்திரம் மற்றும் அதிகபட்சம் 4 குடும்ப உறுப்பினர்களின் விவரங்களை தேர்வு செய்து பதிவு செய்யலாம்.",
     "registration_note_en": "Register with the main participant details, Rasi, Natchathiram, Gothram and details of up to 4 family members.",
-    "payment_provider": "cashfree",
+    "payment_provider": "phonepe",
     "payment_environment": "sandbox",
-    "currency": "INR"
+    "currency": "INR",
+    "default_amount": "999",
+    "payment_mode": "fixed"
   },
   "images": [
     {

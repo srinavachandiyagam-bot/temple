@@ -1,7 +1,7 @@
 {
   "name": "nava-chandi-yagam-backend",
   "version": "1.0.0",
-  "description": "Backend API & Cashfree Payment Gateway integration for Nava Chandi Yagam temple event registration",
+  "description": "Backend API & PhonePe Payment Gateway integration for Nava Chandi Yagam temple event registration – Fixed ₹999 participation",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -15,7 +15,7 @@
   "keywords": [
     "temple",
     "registration",
-    "cashfree",
+    "phonepe",
     "postgresql",
     "express",
     "nodejs"

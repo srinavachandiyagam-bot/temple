@@ -1,8 +1,8 @@
 const assert = require('assert');
 const crypto = require('crypto');
-const { generateRegistrationId, generateCashfreeOrderId } = require('../src/utils/idGenerator');
+const { generateRegistrationId, generatePhonePeOrderId } = require('../src/utils/idGenerator');
 const validateRegistration = require('../src/middleware/validateRegistration');
-const { verifyWebhookSignature } = require('../src/config/cashfree');
+const { verifyPhonePeWebhook } = require('../src/config/phonepe');
 
 let passedTests = 0;
 let totalTests = 0;
@@ -29,11 +29,11 @@ runTest('ID Generator: format matches NCY-XXXXXX', () => {
   }
 });
 
-runTest('Cashfree Order ID: contains registration ID and prefix', () => {
+runTest('PhonePe Order ID: contains registration ID and prefix', () => {
   const regId = 'NCY-7A8B9C';
-  const orderId = generateCashfreeOrderId(regId);
+  const orderId = generatePhonePeOrderId(regId);
   assert.ok(orderId.startsWith('order_NCY7A8B9C_'));
-  assert.ok(orderId.length <= 50);
+  assert.ok(orderId.length <= 63);
 });
 
 // 2. Validation Middleware Tests
@@ -110,34 +110,15 @@ runTest('Validator: Rejects member with empty name', () => {
 });
 
 // 3. Webhook Signature Verification Tests
-runTest('Webhook: Computes and validates HMAC-SHA256 signature correctly', () => {
-  const secretKey = 'test_webhook_secret_key_12345';
-  process.env.CASHFREE_WEBHOOK_SECRET = secretKey;
-
-  const rawBody = JSON.stringify({
-    data: {
-      order: { order_id: 'order_NCY_123456' },
-      payment: { payment_status: 'SUCCESS' }
-    }
-  });
-  const timestamp = Date.now().toString();
-
-  // Generate real signature
-  const signatureData = timestamp + rawBody;
-  const validSignature = crypto
-    .createHmac('sha256', secretKey)
-    .update(signatureData)
-    .digest('base64');
-
-  // Verify should return true
-  assert.strictEqual(verifyWebhookSignature(validSignature, timestamp, rawBody), true);
-
-  // Altered body should return false
-  const tamperedBody = rawBody + ' ';
-  assert.strictEqual(verifyWebhookSignature(validSignature, timestamp, tamperedBody), false);
-
-  // Wrong signature should return false
-  assert.strictEqual(verifyWebhookSignature('invalid_signature==', timestamp, rawBody), false);
+runTest('Webhook: validates PhonePe SHA256(username:password) correctly', () => {
+  const username = 'testuser';
+  const password = 'testpass123';
+  process.env.PHONEPE_CALLBACK_USERNAME = username;
+  process.env.PHONEPE_CALLBACK_PASSWORD = password;
+  const crypto = require('crypto');
+  const expected = crypto.createHash('sha256').update(`${username}:${password}`).digest('hex');
+  assert.strictEqual(verifyPhonePeWebhook(expected, JSON.stringify({test:1}), {}), true);
+  assert.strictEqual(verifyPhonePeWebhook('invalid', JSON.stringify({test:1}), {}), false);
 });
 
 console.log(`\nResults: ${passedTests} / ${totalTests} tests passed.`);

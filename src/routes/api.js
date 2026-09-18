@@ -5,7 +5,7 @@ const validateRegistration = require('../middleware/validateRegistration');
 const { registerDevotee } = require('../controllers/registrationController');
 const { verifyPayment, handleWebhook } = require('../controllers/paymentController');
 const { query } = require('../config/db');
-const { getCashfreeOrder } = require('../config/cashfree');
+const { getPhonePeOrderStatus } = require('../config/phonepe');
 const { loginAdmin, loginWithCredentials, requireAdminAuth, requireSuperAdminAuth } = require('../middleware/auth');
 const { listAdmins, createAdmin, deleteAdmin } = require('../config/adminUserManager');
 const {
@@ -27,8 +27,13 @@ const requireMockMode = require('../middleware/requireMockMode');
 
 // Registration & Payment Endpoints
 router.post('/register', validateRegistration, registerDevotee);
-router.get('/cashfree/verify', verifyPayment);
+router.get('/phonepe/verify', verifyPayment);
+router.get('/phonepe/callback', verifyPayment); // legacy alias for return URL compatibility
+router.post('/phonepe/callback', handleWebhook);
+router.post('/phonepe/webhook', handleWebhook);
+// Legacy alias for old Cashfree deployments
 router.post('/cashfree/webhook', handleWebhook);
+router.get('/cashfree/verify', verifyPayment);
 
 // Public website content & settings
 router.get('/public', async (req, res) => {
@@ -233,18 +238,20 @@ router.post('/settings', requireAdminAuth, async (req, res) => {
   }
 });
 
-router.get('/cashfree/status', requireAdminAuth, (req, res) => {
-  const configured = !!(process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY);
+router.get('/phonepe/status', requireAdminAuth, (req, res) => {
+  const configured = !!(process.env.PHONEPE_CLIENT_ID && process.env.PHONEPE_CLIENT_SECRET);
   res.json({
     configured,
-    environment: process.env.CASHFREE_ENV || 'sandbox',
-    apiVersion: process.env.CASHFREE_API_VERSION || '2023-08-01'
+    provider: 'phonepe',
+    environment: process.env.PHONEPE_ENV || 'sandbox',
+    clientVersion: process.env.PHONEPE_CLIENT_VERSION || '1'
   });
 });
-
-// ====================================================================
-// 4. ADMIN REGISTRATIONS MANAGEMENT & CSV EXPORT
-// ====================================================================
+// Legacy alias
+router.get('/cashfree/status', requireAdminAuth, (req, res) => {
+  const configured = !!(process.env.PHONEPE_CLIENT_ID && process.env.PHONEPE_CLIENT_SECRET);
+  res.json({ configured, environment: process.env.PHONEPE_ENV || 'sandbox', provider: 'phonepe' });
+});
 
 router.get('/registrations', requireAdminAuth, async (req, res, next) => {
   try {
@@ -252,21 +259,33 @@ router.get('/registrations', requireAdminAuth, async (req, res, next) => {
     try {
       regResult = await query(
         `SELECT id, registration_id, name, mobile, email, address,
-                rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+                rasi, natchathiram, gothram, payment_status, cashfree_order_id, phonepe_merchant_order_id, phonepe_order_id,
                 amount, donation_amount, created_at, updated_at
          FROM registrations
          ORDER BY id DESC`
       );
     } catch (colErr) {
       const msg = String((colErr && colErr.message) || '');
-      if (/donation_amount|no such column|undefined column/i.test(msg)) {
-        regResult = await query(
-          `SELECT id, registration_id, name, mobile, email, address,
-                  rasi, natchathiram, gothram, payment_status, cashfree_order_id,
-                  amount, created_at, updated_at
-           FROM registrations
-           ORDER BY id DESC`
-        );
+      if (/phonepe_merchant_order_id|donation_amount|no such column|undefined column/i.test(msg)) {
+        try {
+          regResult = await query(
+            `SELECT id, registration_id, name, mobile, email, address,
+                    rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+                    amount, donation_amount, created_at, updated_at
+             FROM registrations
+             ORDER BY id DESC`
+          );
+        } catch (e2) {
+          if (/donation_amount|no such column|undefined column/i.test(String(e2.message||''))) {
+            regResult = await query(
+              `SELECT id, registration_id, name, mobile, email, address,
+                      rasi, natchathiram, gothram, payment_status, cashfree_order_id,
+                      amount, created_at, updated_at
+               FROM registrations
+               ORDER BY id DESC`
+            );
+          } else throw e2;
+        }
       } else {
         throw colErr;
       }
@@ -275,6 +294,9 @@ router.get('/registrations', requireAdminAuth, async (req, res, next) => {
     const registrations = regResult.rows;
     for (const reg of registrations) {
       if (reg.donation_amount === undefined || reg.donation_amount === null) reg.donation_amount = 0;
+      reg.phonepe_merchant_order_id = reg.phonepe_merchant_order_id || reg.cashfree_order_id;
+      reg.order_id = reg.phonepe_merchant_order_id || reg.cashfree_order_id;
+      reg.phonepe_order_id = reg.phonepe_order_id || null;
     }
 
     for (const reg of registrations) {
@@ -286,7 +308,7 @@ router.get('/registrations', requireAdminAuth, async (req, res, next) => {
         [reg.id]
       );
       reg.family = memResult.rows || [];
-      reg.order_id = reg.cashfree_order_id;
+      reg.order_id = reg.phonepe_merchant_order_id || reg.cashfree_order_id;
     }
 
     res.json(registrations);
@@ -315,39 +337,41 @@ router.patch('/registrations/:id', requireAdminAuth, async (req, res, next) => {
   }
 });
 
-router.post('/registrations/:id/sync-cashfree', requireAdminAuth, async (req, res, next) => {
+router.post('/registrations/:id/sync-phonepe', requireAdminAuth, async (req, res, next) => {
   try {
     const id = req.params.id;
     const regResult = await query(`SELECT * FROM registrations WHERE id = $1`, [id]);
     if (regResult.rows.length === 0) return res.status(404).json({ error: 'Registration not found' });
 
     const reg = regResult.rows[0];
-    if (!reg.cashfree_order_id) {
-      return res.status(400).json({ error: 'Registration has no cashfree_order_id' });
+    const merchantId = reg.phonepe_merchant_order_id || reg.cashfree_order_id;
+    if (!merchantId) {
+      return res.status(400).json({ error: 'Registration has no phonepe order id' });
     }
 
-    const cfOrder = await getCashfreeOrder(reg.cashfree_order_id);
-    const cfStatus = (cfOrder.order_status || '').toUpperCase();
+    const ppOrder = await getPhonePeOrderStatus(merchantId);
+    const cfStatus = String(ppOrder.state || '').toUpperCase();
     const { amountsEqual } = require('../config/pricing');
     let newStatus = reg.payment_status;
 
-    if (cfStatus === 'PAID') {
-      if (!amountsEqual(cfOrder.order_amount, reg.amount)) {
+    if (cfStatus === 'COMPLETED') {
+      const ppAmount = ppOrder.amount != null ? Number(ppOrder.amount)/100 : null;
+      if (ppAmount !== null && !amountsEqual(ppAmount, reg.amount)) {
         console.warn(
-          `Sync amount mismatch for order ${reg.cashfree_order_id}: cashfree=${cfOrder.order_amount} db=${reg.amount}. NOT marking paid.`
+          `Sync amount mismatch for order ${merchantId}: phonepe=${ppOrder.amount} db=${reg.amount}. NOT marking paid.`
         );
         return res.status(409).json({
           success: false,
           error: 'Payment amount mismatch. Registration not marked as paid.',
           status: reg.payment_status,
-          cashfree_amount: cfOrder.order_amount,
+          phonepe_amount: ppOrder.amount,
           db_amount: reg.amount
         });
       }
       newStatus = 'paid';
     }
-    else if (cfStatus === 'ACTIVE') newStatus = 'pending';
-    else if (['TERMINATED', 'EXPIRED', 'FAILED'].includes(cfStatus)) newStatus = 'failed';
+    else if (cfStatus === 'PENDING') newStatus = 'pending';
+    else if (['FAILED'].includes(cfStatus)) newStatus = 'failed';
 
     await query(
       `UPDATE registrations
@@ -655,7 +679,7 @@ router.get('/mock/order-info', requireMockMode, async (req, res) => {
       const msg = String((colErr && colErr.message) || '');
       if (/donation_amount|no such column|undefined column/i.test(msg)) {
         result = await query(
-          'SELECT registration_id, name, mobile, amount, payment_status, cashfree_order_id FROM registrations WHERE cashfree_order_id = $1',
+          'SELECT registration_id, name, mobile, amount, payment_status, phonepe_merchant_order_id, cashfree_order_id FROM registrations WHERE phonepe_merchant_order_id = $1 OR cashfree_order_id = $1',
           [orderId]
         );
       } else {
@@ -681,14 +705,14 @@ router.post('/mock/pay', requireMockMode, async (req, res) => {
     if (!order_id) return res.status(400).json({ error: 'Missing order_id' });
 
     const targetStatus = (status || 'paid').toLowerCase();
-    const cfStatus = targetStatus === 'paid' ? 'PAID' : 'FAILED';
+    const ppState = targetStatus === 'paid' ? 'COMPLETED' : 'FAILED';
     const dbStatus = targetStatus === 'paid' ? 'paid' : 'failed';
 
-    const { setMockOrderStatus } = require('../config/cashfree');
-    setMockOrderStatus(order_id, cfStatus);
+    const { setMockOrderStatus } = require('../config/phonepe');
+    setMockOrderStatus(order_id, ppState);
 
     await query(
-      'UPDATE registrations SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE cashfree_order_id = $2',
+      'UPDATE registrations SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE phonepe_merchant_order_id = $2 OR cashfree_order_id = $2',
       [dbStatus, order_id]
     );
 

@@ -1,15 +1,15 @@
 const db = require('../config/db');
-const { createCashfreeOrder, CASHFREE_ENV } = require('../config/cashfree');
-const { generateRegistrationId, generateCashfreeOrderId } = require('../utils/idGenerator');
+const { createPhonePeOrder, PHONEPE_ENV } = require('../config/phonepe');
+const { generateRegistrationId, generatePhonePeOrderId } = require('../utils/idGenerator');
 const { calculatePaymentAmounts } = require('../config/pricing');
 
 /**
- * Controller to handle devotee registration and Cashfree payment order creation
+ * Controller to handle devotee registration and PhonePe payment order creation
  * Endpoint: POST /api/register
+ * FIXED: Participation amount is ₹999 only, no donation. Server is authoritative via pricing.js.
  */
 async function registerDevotee(req, res, next) {
   const { name, mobile, email, address, rasi, natchathiram, gothram, members } = req.sanitizedBody;
-  // FIXED: Participation amount is ₹999 only, no donation. Server is authoritative.
   let pricing;
   try {
     pricing = await calculatePaymentAmounts(0);
@@ -17,136 +17,111 @@ async function registerDevotee(req, res, next) {
     const status = pricingErr.status || 500;
     return res.status(status).json({ success: false, error: pricingErr.message || 'Invalid payment amounts.' });
   }
-  const registrationFee = pricing.registrationFee;
-  const donation = 0;
-  const amount = pricing.totalAmount;
+  const amount = pricing.totalAmount; // should be 999
+  const amountPaise = Math.round(amount * 100); // 99900
 
-  // 1. Generate unique identifiers
   const registrationId = generateRegistrationId();
-  const cashfreeOrderId = generateCashfreeOrderId(registrationId);
+  const phonepeMerchantOrderId = generatePhonePeOrderId(registrationId);
 
-  // 2. Prepare URLs for payment redirection and webhook
   const baseUrl = process.env.PUBLIC_BASE_URL || process.env.CLIENT_URL || process.env.SERVER_URL || `http://localhost:${process.env.PORT || 3000}`;
   const clientUrl = process.env.CLIENT_URL || baseUrl;
   const serverUrl = process.env.SERVER_URL || baseUrl;
-  const returnUrl = `${clientUrl}/?order_id={order_id}`;
-  const notifyUrl = `${serverUrl}/api/cashfree/webhook`;
+  const redirectUrl = `${clientUrl}/?order_id=${encodeURIComponent(phonepeMerchantOrderId)}`;
 
   let client;
   try {
-    // 3. Connect to Database and start transaction
     client = await db.getClient();
     await client.query('BEGIN');
 
-    // 4. Insert into registrations table with pending_payment status
-    // amount = TOTAL charged (fee + donation) for backward compatibility.
-    // donation_amount is REQUIRED. There is intentionally NO legacy fallback
-    // retry here: once a statement fails inside a PostgreSQL transaction, the
-    // transaction is aborted (25P02) and any further INSERT in the same
-    // transaction is invalid. If the schema is missing donation_amount,
-    // fail safely via ROLLBACK + error instead of silently dropping donations.
+    // Single authoritative INSERT – donation_amount is required and always 0.
+    // No legacy retry: if the column is missing, the DB migration (dbReady) must have failed
+    // and the transaction will safely rollback via the outer catch (never 25P02).
     const insertRegQuery = `
       INSERT INTO registrations (
         registration_id, name, mobile, email, address,
         rasi, natchathiram, gothram, payment_status,
-        cashfree_order_id, amount, donation_amount
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11)
+        cashfree_order_id, phonepe_merchant_order_id, phonepe_order_id, amount, donation_amount
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $9, $9, $10, $11)
       RETURNING id, registration_id, name, mobile, payment_status, created_at;
     `;
 
     const regResult = await client.query(insertRegQuery, [
-      registrationId,
-      name,
-      mobile,
-      email,
-      address,
-      rasi,
-      natchathiram,
-      gothram,
-      cashfreeOrderId,
-      amount,
-      donation
+      registrationId, name, mobile, email, address, rasi, natchathiram, gothram,
+      phonepeMerchantOrderId, amount, 0
     ]);
 
     const createdRegistration = regResult.rows[0];
 
-    // 5. Insert family members if provided
     if (members && members.length > 0) {
       const insertMemberQuery = `
         INSERT INTO registration_members (
           registration_id, member_number, name, rasi, natchathiram, gothram
         ) VALUES ($1, $2, $3, $4, $5, $6);
       `;
-
       for (const m of members) {
         await client.query(insertMemberQuery, [
-          createdRegistration.id,
-          m.memberNumber,
-          m.name,
-          m.rasi,
-          m.natchathiram,
-          m.gothram
+          createdRegistration.id, m.memberNumber, m.name, m.rasi, m.natchathiram, m.gothram
         ]);
       }
     }
 
-    // 6. Create payment order with Cashfree Orders API
-    let cashfreeOrder;
+    let phonepeOrder;
     try {
-      cashfreeOrder = await createCashfreeOrder({
-        orderId: cashfreeOrderId,
-        orderAmount: amount,
-        customerName: name,
-        customerPhone: mobile,
-        customerEmail: email,
-        returnUrl,
-        notifyUrl,
-        orderNote: `Nava Chandi Yagam - ${registrationId}`
+      phonepeOrder = await createPhonePeOrder({
+        merchantOrderId: phonepeMerchantOrderId,
+        amountPaise: amountPaise,
+        redirectUrl: redirectUrl,
+        message: `Nava Chandi Yagam - ${registrationId}`,
+        metaInfo: { udf1: registrationId, udf2: name, udf3: mobile }
       });
-    } catch (cfError) {
-      // Rollback database transaction if payment gateway order creation fails
+      // Persist PhonePe internal orderId if available
+      if (phonepeOrder.orderId) {
+        try {
+          await client.query(`UPDATE registrations SET phonepe_order_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [phonepeOrder.orderId, createdRegistration.id]);
+        } catch (e) {
+          // Column may not exist yet – ignore, already have merchant id
+        }
+      }
+    } catch (ppError) {
       await client.query('ROLLBACK');
-      console.error('Cashfree Order creation failed:', cfError.message, cfError.details || '');
+      console.error('PhonePe Order creation failed:', ppError.message, ppError.details || '');
       return res.status(502).json({
         success: false,
-        error: `Payment gateway error: ${cfError.message}`,
-        details: cfError.details
+        error: `Payment gateway error: ${ppError.message}`,
+        details: ppError.details
       });
     }
 
-    // 7. Commit database transaction
     await client.query('COMMIT');
 
-    // 8. Return payment session and order details to frontend
-    // Server response is authoritative if frontend preview differs.
+    const isMock = phonepeOrder.redirectUrl && phonepeOrder.redirectUrl.includes('/mock-checkout');
+    const checkoutUrl = phonepeOrder.redirectUrl || null;
+
     return res.status(201).json({
       success: true,
       message: 'Registration created successfully. Please proceed with payment.',
       registrationId,
-      orderId: cashfreeOrderId,
-      paymentSessionId: cashfreeOrder.payment_session_id,
-      paymentMode: CASHFREE_ENV,
-      registrationFee,
-      donationAmount: donation,
+      orderId: phonepeMerchantOrderId,
+      merchantOrderId: phonepeMerchantOrderId,
+      phonepeOrderId: phonepeOrder.orderId || null,
+      redirectUrl: checkoutUrl,
+      checkoutUrl: checkoutUrl,
+      paymentMode: PHONEPE_ENV,
+      registrationFee: amount,
+      donationAmount: 0,
       amount,
-      mockCheckoutUrl: cashfreeOrder.mock_checkout_url || (cashfreeOrder.payment_session_id && cashfreeOrder.payment_session_id.startsWith('session_mock_') ? `/mock-checkout?order_id=${encodeURIComponent(cashfreeOrderId)}` : null)
+      amountPaise,
+      mockCheckoutUrl: isMock ? checkoutUrl : null
     });
 
   } catch (dbError) {
     if (client) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (rollbackErr) {
-        console.error('Error during rollback:', rollbackErr);
-      }
+      try { await client.query('ROLLBACK'); } catch (e) { console.error('Rollback error:', e); }
     }
-
     console.error('Registration database error:', dbError);
     return next(dbError);
   } finally {
-    if (client) {
-      client.release();
-    }
+    if (client) client.release();
   }
 }
 

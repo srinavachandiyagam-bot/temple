@@ -15,8 +15,11 @@ CREATE TABLE IF NOT EXISTS registrations (
     natchathiram TEXT,
     gothram TEXT,
     payment_status TEXT NOT NULL DEFAULT 'pending',
+    phonepe_merchant_order_id TEXT UNIQUE,
+    phonepe_order_id TEXT,
+    phonepe_transaction_id TEXT,
     cashfree_order_id TEXT UNIQUE,
-    amount REAL NOT NULL DEFAULT 1000.00,
+    amount REAL NOT NULL DEFAULT 999.00,
     donation_amount REAL NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -36,7 +39,6 @@ CREATE TABLE IF NOT EXISTS registration_members (
 
 -- 3. Indexes for fast lookups
 CREATE INDEX IF NOT EXISTS idx_registrations_registration_id ON registrations (registration_id);
-CREATE INDEX IF NOT EXISTS idx_registrations_cashfree_order_id ON registrations (cashfree_order_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_payment_status ON registrations (payment_status);
 CREATE INDEX IF NOT EXISTS idx_registrations_mobile ON registrations (mobile);
 CREATE INDEX IF NOT EXISTS idx_registration_members_registration_id ON registration_members (registration_id);

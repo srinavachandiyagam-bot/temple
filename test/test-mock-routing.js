@@ -6,8 +6,8 @@ const path = require('path');
 const origEnv = {
   MOCK_MODE: process.env.MOCK_MODE,
   MOCK_PAYMENT: process.env.MOCK_PAYMENT,
-  CASHFREE_APP_ID: process.env.CASHFREE_APP_ID,
-  CASHFREE_SECRET_KEY: process.env.CASHFREE_SECRET_KEY,
+  PHONEPE_CLIENT_ID: process.env.PHONEPE_CLIENT_ID,
+  PHONEPE_CLIENT_SECRET: process.env.PHONEPE_CLIENT_SECRET,
 };
 
 function restoreOrigEnv() {
@@ -26,8 +26,8 @@ function enableNonMockMode() {
   // Fail-closed: only explicit MOCK_MODE/MOCK_PAYMENT opt-in enables mock.
   process.env.MOCK_MODE = 'false';
   process.env.MOCK_PAYMENT = 'false';
-  process.env.CASHFREE_APP_ID = 'LIVE_REAL_KEY_1234567890';
-  process.env.CASHFREE_SECRET_KEY = 'live_secret_for_routing_test_123456';
+  process.env.PHONEPE_CLIENT_ID = 'LIVE_REAL_KEY_1234567890';
+  process.env.PHONEPE_CLIENT_SECRET = 'live_secret_for_routing_test_123456';
 }
 
 function enableNonMockMissingCreds() {
@@ -35,16 +35,16 @@ function enableNonMockMissingCreds() {
   // Must still be non-mock (fail closed), never fall back to simulator.
   process.env.MOCK_MODE = 'false';
   process.env.MOCK_PAYMENT = 'false';
-  delete process.env.CASHFREE_APP_ID;
-  delete process.env.CASHFREE_SECRET_KEY;
+  delete process.env.PHONEPE_CLIENT_ID;
+  delete process.env.PHONEPE_CLIENT_SECRET;
 }
 
 function enableNonMockPlaceholderCreds() {
   // Placeholder-looking keys must NOT implicitly enable mock mode.
   process.env.MOCK_MODE = 'false';
   process.env.MOCK_PAYMENT = 'false';
-  process.env.CASHFREE_APP_ID = 'TEST10000000000000000000000000000001';
-  process.env.CASHFREE_SECRET_KEY = 'placeholder_secret_for_routing_test';
+  process.env.PHONEPE_CLIENT_ID = 'TEST10000000000000000000000000000001';
+  process.env.PHONEPE_CLIENT_SECRET = 'placeholder_secret_for_routing_test';
 }
 
 async function assertMockEndpointsBlocked(baseUrl, orderId, label) {
@@ -70,7 +70,7 @@ async function assertMockEndpointsBlocked(baseUrl, orderId, label) {
 enableMockMode();
 
 const app = require('../src/server');
-const { getIsMockMode } = require('../src/config/cashfree');
+const { getIsMockMode } = require('../src/config/phonepe');
 const { query } = require('../src/config/db');
 const requireMockMode = require('../src/middleware/requireMockMode');
 
@@ -78,7 +78,7 @@ let server;
 const PORT = 3927;
 
 async function getRegistrationStatusByOrderId(orderId) {
-  const r = await query('SELECT payment_status FROM registrations WHERE cashfree_order_id = $1', [orderId]);
+  const r = await query('SELECT payment_status FROM registrations WHERE phonepe_merchant_order_id = $1', [orderId]);
   if (r.rows.length === 0) return null;
   return r.rows[0].payment_status;
 }
@@ -104,13 +104,13 @@ async function runMockRoutingTests() {
       assert.strictEqual(res.status, 200, `Expected 200 for /mock-checkout in mock mode, got ${res.status}`);
       assert.ok(html.includes('Simulate Success'), 'Mock checkout page should contain "Simulate Success"');
       assert.ok(
-        html.includes('Mock Payment Gateway') || html.includes('Cashfree Mock Gateway') || html.includes('TEST / MOCK MODE'),
+        html.includes('Mock Payment Gateway') || html.includes('PhonePe Mock Gateway') || html.includes('TEST / MOCK MODE'),
         'Mock checkout page should contain recognizable mock UI text'
       );
-      // Must NOT return the public registration page (index.html has Cashfree SDK; mock page does not).
+      // Must NOT return the public registration page (index.html has registration form; mock page does not).
       assert.ok(
-        !html.includes('sdk.cashfree.com/js/v3/cashfree.js'),
-        'Mock checkout route must NOT return public/index.html (found Cashfree SDK marker)'
+        !html.includes('id="reg"') && !html.includes('Participation Registration'),
+        'Mock checkout route must NOT return public/index.html'
       );
       // Cross-check against the file on disk to prove it is mock-checkout.html.
       const expected = fs.readFileSync(path.join(__dirname, '../public/mock-checkout.html'), 'utf8');
@@ -163,12 +163,12 @@ async function runMockRoutingTests() {
       assert.strictEqual(payData.success, true);
       console.log('     ✅ POST /api/mock/pay works in mock mode');
 
-      const verifyRes = await fetch(`${baseUrl}/api/cashfree/verify?order_id=${encodeURIComponent(orderId)}`);
+      const verifyRes = await fetch(`${baseUrl}/api/phonepe/verify?order_id=${encodeURIComponent(orderId)}`);
       const verifyData = await verifyRes.json();
       assert.strictEqual(verifyRes.status, 200, `verify failed: ${verifyRes.status} ${JSON.stringify(verifyData)}`);
       assert.strictEqual(verifyData.status, 'paid');
       assert.strictEqual(verifyData.registrationId, registrationId);
-      console.log('     ✅ GET /api/cashfree/verify returns paid after mock pay');
+      console.log('     ✅ GET /api/phonepe/verify returns paid after mock pay');
     }
 
     // ================================================================
@@ -187,7 +187,7 @@ async function runMockRoutingTests() {
       const safetyOrderId = regData.orderId;
       const beforeStatus = await getRegistrationStatusByOrderId(safetyOrderId);
       assert.ok(
-        beforeStatus === 'pending' || beforeStatus === 'pending_payment',
+        String(beforeStatus).toLowerCase() === 'pending' || String(beforeStatus).toLowerCase() === 'pending_payment',
         `Expected fresh registration to be pending/pending_payment, got ${beforeStatus}`
       );
 
@@ -262,7 +262,7 @@ async function runMockRoutingTests() {
         try {
           assert.strictEqual(getIsMockMode(), false, 'Missing creds with flags false must be non-mock');
           await assertMockEndpointsBlocked(baseUrl, safetyOrderId, 'missing-creds');
-          console.log('     ✅ Missing CASHFREE_APP_ID does not enable mock; simulator stays 404');
+          console.log('     ✅ Missing PHONEPE_CLIENT_ID does not enable mock; simulator stays 404');
         } finally {
           enableMockMode();
         }
@@ -276,7 +276,7 @@ async function runMockRoutingTests() {
         try {
           assert.strictEqual(getIsMockMode(), false, 'Placeholder creds with flags false must be non-mock');
           await assertMockEndpointsBlocked(baseUrl, safetyOrderId, 'placeholder-creds');
-          console.log('     ✅ Placeholder CASHFREE_APP_ID does not enable mock; simulator stays 404');
+          console.log('     ✅ Placeholder PHONEPE_CLIENT_ID does not enable mock; simulator stays 404');
         } finally {
           enableMockMode();
         }
