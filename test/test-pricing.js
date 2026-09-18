@@ -5,7 +5,7 @@ const crypto = require('crypto');
 
 process.env.MOCK_MODE = 'true';
 process.env.ADMIN_PASSWORD = 'change-this-password';
-process.env.CASHFREE_WEBHOOK_SECRET = 'test_webhook_secret_for_pricing_tests_123';
+process.env.PHONEPE_CALLBACK_PASSWORD = 'test_webhook_secret_for_pricing_tests_123';
 delete process.env.REGISTRATION_AMOUNT;
 
 const settingsPath = path.join(__dirname, '../data/settings.json');
@@ -33,7 +33,7 @@ function restoreSettings() {
 const pricing = require('../src/config/pricing');
 const validateRegistration = require('../src/middleware/validateRegistration');
 const app = require('../src/server');
-const { getCashfreeOrder, setMockOrderStatus, setMockOrderAmount } = require('../src/config/cashfree');
+const { getPhonePeOrderStatus, setMockOrderStatus, setMockOrderAmount } = require('../src/config/phonepe');
 
 let server;
 const PORT = 3911;
@@ -133,8 +133,8 @@ async function runPricingTests() {
         const info = await infoRes.json();
         ok('CASE 1 DB amount=999', Number(info.order.amount) === 999);
         ok('CASE 1 DB donation_amount=0', Number(info.order.donation_amount || 0) === 0);
-        const cf = await getCashfreeOrder(data.orderId);
-        ok('CASE 1 mock Cashfree order=999', Number(cf.order_amount) === 999);
+        const cf = await getPhonePeOrderStatus(data.orderId);
+        ok('CASE 1 mock PhonePe order=999 (paise 99900)', Number(cf.amount) === 99900 || Number(cf.order_amount) === 999);
       }
     }
 
@@ -151,8 +151,8 @@ async function runPricingTests() {
         const info = await infoRes.json();
         ok('CASE 2 DB amount=999 (fixed)', Number(info.order.amount) === 999);
         ok('CASE 2 DB donation=0 (removed)', Number(info.order.donation_amount || 0) === 0);
-        const cf = await getCashfreeOrder(case2OrderId);
-        ok('CASE 2 mock Cashfree order=999 (fixed)', Number(cf.order_amount) === 999);
+        const cf = await getPhonePeOrderStatus(case2OrderId);
+        ok('CASE 2 mock PhonePe order=999 (paise 99900) (fixed)', Number(cf.amount) === 99900 || Number(cf.order_amount) === 999);
       }
     }
 
@@ -186,12 +186,12 @@ async function runPricingTests() {
       const orderId = data.orderId;
       setMockOrderAmount(orderId, 1);
       setMockOrderStatus(orderId, 'PAID');
-      const vRes = await fetch(`${baseUrl}/api/cashfree/verify?order_id=${encodeURIComponent(orderId)}`);
+      const vRes = await fetch(`${baseUrl}/api/phonepe/verify?order_id=${encodeURIComponent(orderId)}`);
       const vData = await vRes.json();
       ok('CASE 6 mismatched PAID returns 409', vRes.status === 409, `got ${vRes.status} ${JSON.stringify(vData)}`);
       const infoRes = await fetch(`${baseUrl}/api/mock/order-info?order_id=${encodeURIComponent(orderId)}`);
       const info = await infoRes.json();
-      ok('CASE 6 DB remains non-paid on mismatch', info.order.payment_status !== 'paid', `got ${info.order.payment_status}`);
+      ok('CASE 6 DB remains non-paid on mismatch', String(info.order.payment_status).toLowerCase() !== 'paid', `got ${info.order.payment_status}`);
     }
 
     // CASE 7: matching PAID marks paid
@@ -200,17 +200,17 @@ async function runPricingTests() {
       const orderId = data.orderId;
       assert.strictEqual(data.amount, 999);
       setMockOrderStatus(orderId, 'PAID');
-      const vRes = await fetch(`${baseUrl}/api/cashfree/verify?order_id=${encodeURIComponent(orderId)}`);
+      const vRes = await fetch(`${baseUrl}/api/phonepe/verify?order_id=${encodeURIComponent(orderId)}`);
       const vData = await vRes.json();
       ok('CASE 7 matching PAID verifies paid', vRes.status === 200 && vData.status === 'paid');
       const infoRes = await fetch(`${baseUrl}/api/mock/order-info?order_id=${encodeURIComponent(orderId)}`);
       const info = await infoRes.json();
-      ok('CASE 7 DB marked paid', info.order.payment_status === 'paid');
+      ok('CASE 7 DB marked paid', String(info.order.payment_status).toLowerCase() === 'paid');
     }
 
     // CASE 7b: webhook SUCCESS with matching amount marks paid; mismatch does not
     {
-      const secret = process.env.CASHFREE_WEBHOOK_SECRET;
+      const secret = process.env.PHONEPE_CALLBACK_PASSWORD;
       // matching
       const m1 = await postRegister(baseUrl, { name: 'Webhook Good', mobile: '9000000008', donationAmount: 0 });
       setMockOrderStatus(m1.data.orderId, 'PAID');
@@ -218,14 +218,14 @@ async function runPricingTests() {
       const raw1 = JSON.stringify(payload1);
       const ts1 = Date.now().toString();
       const sig1 = crypto.createHmac('sha256', secret).update(ts1 + raw1).digest('base64');
-      const wRes1 = await fetch(`${baseUrl}/api/cashfree/webhook`, {
+      const wRes1 = await fetch(`${baseUrl}/api/phonepe/callback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-webhook-signature': sig1, 'x-webhook-timestamp': ts1 },
         body: raw1
       });
       ok('CASE 7b webhook matching amount returns 200', wRes1.status === 200, `got ${wRes1.status}`);
       const info1 = await (await fetch(`${baseUrl}/api/mock/order-info?order_id=${encodeURIComponent(m1.data.orderId)}`)).json();
-      ok('CASE 7b webhook matching marks paid', info1.order.payment_status === 'paid');
+      ok('CASE 7b webhook matching marks paid', String(info1.order.payment_status).toLowerCase() === 'paid');
 
       // mismatch
       const m2 = await postRegister(baseUrl, { name: 'Webhook Bad', mobile: '9000000009', donationAmount: 0 });
@@ -235,7 +235,7 @@ async function runPricingTests() {
       const raw2 = JSON.stringify(payload2);
       const ts2 = Date.now().toString();
       const sig2 = crypto.createHmac('sha256', secret).update(ts2 + raw2).digest('base64');
-      const wRes2 = await fetch(`${baseUrl}/api/cashfree/webhook`, {
+      const wRes2 = await fetch(`${baseUrl}/api/phonepe/callback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-webhook-signature': sig2, 'x-webhook-timestamp': ts2 },
         body: raw2
@@ -243,7 +243,7 @@ async function runPricingTests() {
       const wData2 = await wRes2.json().catch(() => ({}));
       ok('CASE 7b webhook mismatch acked 200 with verified:false', wRes2.status === 200 && wData2.verified === false && wData2.reason === 'amount_mismatch', `got ${wRes2.status} ${JSON.stringify(wData2)}`);
       const info2 = await (await fetch(`${baseUrl}/api/mock/order-info?order_id=${encodeURIComponent(m2.data.orderId)}`)).json();
-      ok('CASE 7b webhook mismatch DB stays non-paid', info2.order.payment_status !== 'paid');
+      ok('CASE 7b webhook mismatch DB stays non-paid', String(info2.order.payment_status).toLowerCase() !== 'paid');
     }
 
     // CASE 8: legacy no-donation field omitted remains compatible

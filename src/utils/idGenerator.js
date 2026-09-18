@@ -11,18 +11,29 @@ function generateRegistrationId() {
 }
 
 /**
- * Generates a unique Cashfree Order ID
- * Cashfree requirements: Alphanumeric and underscore/hyphen, max 50 characters
+ * Generates a unique PhonePe Merchant Order ID
+ * PhonePe requirements: Max 63 chars, alphanumeric and underscore/hyphen only
  * Format: order_NCY_<timestamp>_<random>
  */
-function generateCashfreeOrderId(registrationId) {
+function generatePhonePeOrderId(registrationId) {
   const cleanReg = (registrationId || 'NCY').replace(/[^a-zA-Z0-9]/g, '');
   const timestamp = Date.now();
   const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
   return `order_${cleanReg}_${timestamp}_${randomSuffix}`;
 }
 
+// Backward compatibility alias (deprecated – use generatePhonePeOrderId)
+function generateCashfreeOrderId(registrationId) {
+  return generatePhonePeOrderId(registrationId);
+}
+
+function generateMerchantOrderId(registrationId) {
+  return generatePhonePeOrderId(registrationId);
+}
+
 module.exports = {
   generateRegistrationId,
+  generatePhonePeOrderId,
+  generateMerchantOrderId,
   generateCashfreeOrderId
 };

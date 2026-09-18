@@ -77,14 +77,14 @@ async function runAdminTests() {
     assert.strictEqual(updateData.settings.tagline_en, 'Special Nava Chandi Yagam Worship 2026');
     console.log('  ✅ Passed: POST /api/settings updates settings successfully');
 
-    // 7. Test Cashfree Status
-    const cfStatusRes = await fetch(`${baseUrl}/api/cashfree/status`, {
+        // 7. Test PhonePe Status
+    const ppStatusRes = await fetch(`${baseUrl}/api/phonepe/status`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    const cfStatusData = await cfStatusRes.json();
-    assert.strictEqual(cfStatusRes.status, 200);
-    assert.ok(cfStatusData.environment);
-    console.log('  ✅ Passed: GET /api/cashfree/status returns status info');
+    const ppStatusData = await ppStatusRes.json();
+    assert.strictEqual(ppStatusRes.status, 200);
+    assert.ok(ppStatusData.environment);
+    console.log('  ✅ Passed: GET /api/phonepe/status returns status info');
 
     // 8. Test Registrations List (protected)
     const regsRes = await fetch(`${baseUrl}/api/registrations`, {

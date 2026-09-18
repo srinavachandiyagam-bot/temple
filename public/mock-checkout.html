@@ -111,7 +111,7 @@
 
 <div class="card">
   <span class="badge">TEST / MOCK MODE</span>
-  <h1>Cashfree Mock Gateway</h1>
+  <h1>PhonePe Mock Gateway</h1>
   <p class="sub">
     உள்ளூர் சோதனைக்கான கட்டணப் பக்கம்<br>
     Simulated Payment Gateway for Local Testing
@@ -147,7 +147,7 @@
     </button>
 
     <p class="note">
-      💡 <strong>குறிப்பு:</strong> நீங்கள் PostgreSQL மற்றும் Cashfree API keys இல்லாமல் உள்ளூர் முறையில் சோதிக்கிறீர்கள். ஒரு பொத்தானை அழுத்தியதும், நீங்கள் மீண்டும் முகப்புப் பக்கத்திற்கு அனுப்பப்படுவீர்கள், மேலும் உங்கள் பதிவு நிலை அங்கேயே சரிபார்க்கப்படும்.
+      💡 <strong>குறிப்பு:</strong> நீங்கள் PostgreSQL மற்றும் PhonePe API keys இல்லாமல் உள்ளூர் முறையில் சோதிக்கிறீர்கள். ஒரு பொத்தானை அழுத்தியதும், நீங்கள் மீண்டும் முகப்புப் பக்கத்திற்கு அனுப்பப்படுவீர்கள், மேலும் உங்கள் பதிவு நிலை அங்கேயே சரிபார்க்கப்படும்.
     </p>
     <div style="margin-top:20px;padding:14px;background:#fff8f6;border:1px solid #e3d6c8;border-radius:12px;text-align:left;font-size:13px;line-height:1.6">
       <strong>Need Help? Contact:</strong><br>
@@ -177,7 +177,7 @@
       const o = j.order;
       document.getElementById('custName').textContent = o.name || 'Devotee';
       document.getElementById('regId').textContent = o.registration_id || '-';
-      document.getElementById('orderIdText').textContent = o.cashfree_order_id || orderId;
+      document.getElementById('orderIdText').textContent = o.phonepe_merchant_order_id || o.phonepe_order_id || orderId;
       // Never invent ₹1,000 for unknown amounts; show actual DB total.
       const totalNum = Number(o.amount);
       document.getElementById('amount').textContent = Number.isFinite(totalNum)

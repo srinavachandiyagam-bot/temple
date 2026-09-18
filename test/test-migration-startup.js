@@ -20,7 +20,7 @@ process.env.MOCK_PAYMENT = 'true';
 process.env.DATABASE_URL = '';
 process.env.SQLITE_DB_PATH = testDbPath;
 process.env.ADMIN_PASSWORD = 'change-this-password';
-process.env.CASHFREE_WEBHOOK_SECRET = 'test_webhook_secret_migration_startup_123';
+process.env.PHONEPE_CALLBACK_PASSWORD = 'test_webhook_secret_migration_startup_123';
 // Stale bootstrap/file values: DB pre-seed 999 must WIN (never overwritten).
 process.env.REGISTRATION_AMOUNT = '1000';
 process.env.REGISTRATION_FEE_BOOTSTRAP = '1000';
@@ -69,7 +69,7 @@ function createLegacyDbWithoutDonation() {
             natchathiram TEXT,
             gothram TEXT,
             payment_status TEXT NOT NULL DEFAULT 'pending',
-            cashfree_order_id TEXT UNIQUE,
+            phonepe_merchant_order_id TEXT UNIQUE,
             amount REAL NOT NULL DEFAULT 1000.00,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -91,7 +91,7 @@ function createLegacyDbWithoutDonation() {
         );
         INSERT INTO app_settings (setting_key, setting_value, updated_at)
           VALUES ('registration_amount', '999', CURRENT_TIMESTAMP);
-        INSERT INTO registrations (registration_id, name, mobile, payment_status, cashfree_order_id, amount)
+        INSERT INTO registrations (registration_id, name, mobile, payment_status, phonepe_merchant_order_id, amount)
           VALUES ('NCY-OLD001', 'Historical Devotee', '9000000999', 'paid', 'order_NCYOLD001', 999);
       `;
       db.exec(legacySql, (execErr) => {

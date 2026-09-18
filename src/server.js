@@ -57,7 +57,7 @@ app.set('trust proxy', 1);
 // 1. Enable Cross-Origin Resource Sharing
 app.use(cors());
 
-// 2. Parse JSON bodies and capture raw request body for Cashfree webhook signature verification
+// 2. Parse JSON bodies and capture raw request body for PhonePe webhook signature verification
 app.use(express.json({
   verify: (req, res, buf) => {
     req.rawBody = buf.toString();
@@ -70,7 +70,7 @@ app.use(express.urlencoded({ extended: true }));
 // the frontend catch-all (so /mock-checkout?order_id=ABC serves
 // mock-checkout.html with its query string intact, not index.html).
 // requireMockMode uses the same getIsMockMode() determination as
-// createCashfreeOrder(). Non-mock requests get 404.
+// createPhonePeOrder(). Non-mock requests get 404.
 app.get(['/mock-checkout', '/mock-checkout.html'], requireMockMode, (req, res) => {
   res.sendFile(path.join(__dirname, '../public/mock-checkout.html'));
 });
@@ -91,7 +91,7 @@ app.get(['/health', '/api/health'], (req, res) => {
     status: 'ok',
     service: 'Nava Chandi Yagam Registration API',
     environment: process.env.NODE_ENV || 'development',
-    cashfreeEnv: process.env.CASHFREE_ENV || 'sandbox',
+    phonepeEnv: process.env.PHONEPE_ENV || 'sandbox',
     timestamp: new Date().toISOString()
   });
 });
@@ -166,8 +166,8 @@ async function startServer(portToTry = process.env.PORT || 3000) {
     console.log(`   - Port: ${port}`);
     console.log(`   - URL: http://localhost:${port}`);
     console.log(`   - Environment: ${process.env.NODE_ENV || 'production'}`);
-    console.log(`   - Mode: ${process.env.MOCK_MODE === 'true' ? 'Mock Mode (In-memory DB & Simulated Cashfree)' : 'Production / Real DB'}`);
-    console.log(`   - Cashfree Mode: ${process.env.CASHFREE_ENV || 'sandbox'}`);
+    console.log(`   - Mode: ${process.env.MOCK_MODE === 'true' ? 'Mock Mode (In-memory DB & Simulated PhonePe)' : 'Production / Real DB'}`);
+    console.log(`   - PhonePe Mode: ${process.env.PHONEPE_ENV || 'sandbox'}`);
     console.log(`====================================================`);
   });
 

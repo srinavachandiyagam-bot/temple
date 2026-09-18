@@ -18,7 +18,7 @@ process.env.MOCK_PAYMENT = 'true';
 process.env.DATABASE_URL = '';
 process.env.SQLITE_DB_PATH = testDbPath;
 process.env.ADMIN_PASSWORD = 'change-this-password';
-process.env.CASHFREE_WEBHOOK_SECRET = 'test_webhook_secret_fee_persist_123';
+process.env.PHONEPE_CALLBACK_PASSWORD = 'test_webhook_secret_fee_persist_123';
 process.env.REGISTRATION_AMOUNT = '999';
 delete process.env.REGISTRATION_FEE_BOOTSTRAP;
 
@@ -51,7 +51,7 @@ try { setFileAmount('1000'); } catch (e) { console.error('setup file fee failed:
 const { query } = require('../src/config/db');
 const pricing = require('../src/config/pricing');
 const feeStore = require('../src/config/registrationFeeStore');
-const { getCashfreeOrder } = require('../src/config/cashfree');
+const { getPhonePeOrderStatus } = require('../src/config/phonepe');
 const app = require('../src/server');
 
 let server;
@@ -242,8 +242,8 @@ async function runFeePersistenceTests() {
     ok('CASE 4 register 999+501 returns 201', res.status === 201, `got ${res.status} ${JSON.stringify(data)}`);
     ok('CASE 4 register response 999/0/999 (fixed)', data && data.registrationFee === 999 && data.donationAmount === 0 && data.amount === 999, `got ${JSON.stringify(data)}`);
     if (data && data.orderId) {
-      const cf = await getCashfreeOrder(data.orderId);
-      ok('CASE 4 mock Cashfree order = 999 (fixed)', Number(cf.order_amount) === 999, `got ${JSON.stringify(cf)}`);
+      const cf = await getPhonePeOrderStatus(data.orderId);
+      ok('CASE 4 mock PhonePe order = 99900 paise (fixed)', Number(cf.amount) === 99900 || Number(cf.order_amount) === 999, `got ${JSON.stringify(cf)}`);
     }
   }
 

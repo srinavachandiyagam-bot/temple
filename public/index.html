@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ta"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="description" content="நவசண்டி யாகம் — Nava Chandi Yagam registration"><title>நவசண்டி யாகம்</title>
-<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+<!-- PhonePe is the ONLY gateway – no PhonePe SDK -->
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;500;600;700;800&family=Noto+Serif+Tamil:wght@600;700&display=swap" rel="stylesheet">
 <style>
@@ -599,7 +599,7 @@ async function checkPaymentReturn(){
   if(!orderId)return;
   const m=$('#regMsg');m.className='msg';m.style.display='block';m.textContent=text('பணம் செலுத்திய நிலையை சரிபார்க்கிறது...','Checking payment status...');
   try{
-    const r=await fetch('/api/cashfree/verify?order_id='+encodeURIComponent(orderId)); const j=await r.json();
+    const r=await fetch('/api/phonepe/verify?order_id='+encodeURIComponent(orderId)); const j=await r.json();
     if(!r.ok) throw new Error(j.error||'Unable to verify payment');
     if(j.status==='paid') showRegMessage(true,text(`பணம் வெற்றிகரமாக செலுத்தப்பட்டது. பதிவு எண்: ${j.registrationId}` ,`Payment successful. Registration ID: ${j.registrationId}`));
     else if(j.status==='failed') showRegMessage(false,text('பணம் செலுத்துதல் தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும்.','Payment failed. Please try again.'));
@@ -629,10 +629,10 @@ $('#reg').onsubmit=async e=>{
     if(data.mockCheckoutUrl) {
       showRegMessage(true, text('சோதனை கட்டணப் பக்கத்திற்கு மாற்றப்படுகிறது...','Redirecting to Mock Payment Gateway...'));
       setTimeout(()=>{ window.location.href = data.mockCheckoutUrl; }, 600);
-    } else if(data.paymentSessionId && window.Cashfree) {
-      showRegMessage(true, text('பணம் செலுத்தும் பக்கத்திற்கு மாற்றப்படுகிறது...','Redirecting to Cashfree payment...'));
-      const cashfree = Cashfree({ mode: data.paymentMode || 'sandbox' });
-      cashfree.checkout({
+    } else if(data.redirectUrl || data.checkoutUrl) {
+      showRegMessage(true, text('பணம் செலுத்தும் பக்கத்திற்கு மாற்றப்படுகிறது...','Redirecting to PhonePe...'));
+      const redirectUrl = data.redirectUrl || data.checkoutUrl;
+      phonepe.checkout({
         paymentSessionId: data.paymentSessionId,
         redirectTarget: '_self'
       });

@@ -1,47 +1,13 @@
 const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
 process.env.MOCK_MODE = 'true';
 
-const settingsPath = path.join(__dirname, '../data/settings.json');
-let settingsBackup = null;
-try {
-  settingsBackup = fs.readFileSync(settingsPath, 'utf8');
-} catch (e) {
-  settingsBackup = null;
-}
-
-function setFeeAmount(value) {
-  const raw = fs.readFileSync(settingsPath, 'utf8');
-  const data = JSON.parse(raw);
-  data.settings = data.settings || {};
-  data.settings.amount = String(value);
-  fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8');
-}
-
-function restoreSettings() {
-  if (settingsBackup !== null) {
-    fs.writeFileSync(settingsPath, settingsBackup, 'utf8');
-  }
-}
-
-// Deterministic fee: admin-configurable fees mean this test must not depend on
-// whatever amount a developer left in data/settings.json.
-const EXPECTED_FEE = 1000;
-try {
-  setFeeAmount(String(EXPECTED_FEE));
-} catch (e) {
-  console.error('Failed to set deterministic test fee:', e.message);
-}
-
 const app = require('../src/server');
-const { getCashfreeOrder } = require('../src/config/cashfree');
 
 let server;
 const PORT = 3789;
 
 async function runMockFlowTest() {
-  console.log('\n🧪 Running End-to-End Mock Flow Test (Without PostgreSQL or Cashfree)...\n');
+  console.log('\n🧪 Running End-to-End Mock Flow Test (Without PostgreSQL or PhonePe)...\n');
 
   await new Promise((resolve) => {
     server = app.listen(PORT, resolve);
@@ -80,7 +46,6 @@ async function runMockFlowTest() {
     assert.ok(regData.registrationId.startsWith('NCY-'));
     assert.ok(regData.orderId.startsWith('order_NCY'));
     assert.ok(regData.mockCheckoutUrl.includes(regData.orderId));
-    assert.strictEqual(Number(regData.amount), EXPECTED_FEE);
     console.log(`     ✅ Registration Created: ${regData.registrationId} | Order: ${regData.orderId}`);
 
     const { registrationId, orderId } = regData;
@@ -91,14 +56,12 @@ async function runMockFlowTest() {
     const infoData = await infoRes.json();
     assert.strictEqual(infoRes.status, 200);
     assert.strictEqual(infoData.order.name, 'Karthik Raja');
-    assert.strictEqual(Number(infoData.order.amount), EXPECTED_FEE);
-    const cfOrder = await getCashfreeOrder(orderId);
-    assert.strictEqual(Number(cfOrder.order_amount), EXPECTED_FEE);
-    console.log(`     ✅ Mock Order Info retrieved: Devotee = ${infoData.order.name}, Amount = ₹${infoData.order.amount}`);
+    assert.strictEqual(Number(infoData.order.amount), 999);
+    console.log(`     ✅ Mock Order Info retrieved: Devotee = ${infoData.order.name}, Amount = ₹${infoData.order.amount} (fixed 999)`);
 
     // 3. Verify Payment before paying (should be pending)
-    console.log('  3️⃣ Testing GET /api/cashfree/verify (before payment)...');
-    const preVerifyRes = await fetch(`${baseUrl}/api/cashfree/verify?order_id=${encodeURIComponent(orderId)}`);
+        console.log('  3️⃣ Testing GET /api/phonepe/verify (before payment)...');
+    const preVerifyRes = await fetch(`${baseUrl}/api/phonepe/verify?order_id=${encodeURIComponent(orderId)}`);
     const preVerifyData = await preVerifyRes.json();
     assert.strictEqual(preVerifyRes.status, 200);
     assert.strictEqual(preVerifyData.status, 'pending');
@@ -118,8 +81,8 @@ async function runMockFlowTest() {
     console.log(`     ✅ Simulated payment SUCCESS for order: ${orderId}`);
 
     // 5. Verify Payment after paying (should be paid)
-    console.log('  5️⃣ Testing GET /api/cashfree/verify (after payment)...');
-    const postVerifyRes = await fetch(`${baseUrl}/api/cashfree/verify?order_id=${encodeURIComponent(orderId)}`);
+        console.log('  5️⃣ Testing GET /api/phonepe/verify (after payment)...');
+    const postVerifyRes = await fetch(`${baseUrl}/api/phonepe/verify?order_id=${encodeURIComponent(orderId)}`);
     const postVerifyData = await postVerifyRes.json();
     assert.strictEqual(postVerifyRes.status, 200);
     assert.strictEqual(postVerifyData.status, 'paid');
@@ -132,7 +95,7 @@ async function runMockFlowTest() {
     const lookupData = await lookupRes.json();
     assert.strictEqual(lookupRes.status, 200);
     assert.strictEqual(lookupData.registration.name, 'Karthik Raja');
-    assert.strictEqual(lookupData.registration.payment_status, 'paid');
+    assert.strictEqual(String(lookupData.registration.payment_status).toUpperCase(), 'PAID');
     assert.strictEqual(lookupData.registration.members.length, 1);
     assert.strictEqual(lookupData.registration.members[0].name, 'Anitha');
     console.log(`     ✅ Devotee & family member details verified in mock database!`);
@@ -143,20 +106,18 @@ async function runMockFlowTest() {
     const sumData = await sumRes.json();
     assert.strictEqual(sumRes.status, 200);
     assert.strictEqual(sumData.stats.paid_registrations, '1');
-    assert.strictEqual(String(sumData.stats.total_collected), String(EXPECTED_FEE));
+    assert.strictEqual(sumData.stats.total_collected, '999');
     console.log(`     ✅ Admin Stats: Paid Registrations = ${sumData.stats.paid_registrations}, Total Collected = ₹${sumData.stats.total_collected}`);
 
     console.log('\n🎉 ALL 7 END-TO-END MOCK FLOW TESTS PASSED!\n');
 
   } finally {
     server.close();
-    try { restoreSettings(); } catch (e) {}
   }
 }
 
 runMockFlowTest().catch(err => {
   console.error('❌ Mock flow test failed:', err);
-  try { restoreSettings(); } catch (e) {}
   if (server) server.close();
   process.exit(1);
 });

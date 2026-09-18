@@ -81,21 +81,21 @@ body{font-size:18px}.top{z-index:100}.hero{position:relative;min-height:680px;pa
 <h2>4. Payment Information</h2>
 <p>We do not store your full payment instrument details on our servers:</p>
 <ul>
-<li>Card numbers, UPI PIN, CVV, card PIN, banking passwords and OTPs are entered only on the payment gateway&rsquo;s secure checkout page (Cashfree / PhonePe).</li>
-<li>We store only the payment metadata returned by the gateway: payment status (paid/pending/failed), order ID (e.g. <code>NCY_...</code>), cashfree_order_id / payment ID, payment method, payment time, bank reference and payment message.</li>
+<li>Card numbers, UPI PIN, CVV, card PIN, banking passwords and OTPs are entered only on the payment gateway&rsquo;s secure checkout page (PhonePe).</li>
+<li>We store only the payment metadata returned by the gateway: payment status (paid/pending/failed), order ID (e.g. <code>NCY_...</code>), phonepe_merchant_order_id / payment ID, payment method, payment time, bank reference and payment message.</li>
 <li>The participation amount (&#8377;999) and currency (INR) are recorded with the registration.</li>
 </ul>
 
-<h2>5. Payment Gateway / PhonePe / Cashfree</h2>
+<h2>5. Payment Gateway / PhonePe</h2>
 <p>When you click &ldquo;Proceed to Payment&rdquo;, you are redirected to the gateway&rsquo;s hosted checkout. The gateway is a PCI-DSS compliant third party that independently handles encryption and authorisation. Your relationship with the gateway for the transaction is also governed by the gateway&rsquo;s privacy policy and terms. We receive only a success/failure notification and reference IDs, not your authentication secrets.</p>
-<p><strong>We never write PhonePe Merchant ID, secret keys or Cashfree client secret to any public page.</strong></p>
+<p><strong>We never write PhonePe Merchant ID, secret keys or PhonePe client secret to any public page.</strong></p>
 
 <h2>6. Third-Party Services</h2>
 <ul>
-<li><strong>Payment gateway</strong> (Cashfree / PhonePe) for payment processing.</li>
+<li><strong>Payment gateway</strong> (PhonePe) for payment processing.</li>
 <li><strong>Google Maps</strong> for venue location links.</li>
 <li><strong>WhatsApp</strong> for contact via <code>wa.me</code> links.</li>
-<li><strong>Cashfree SDK</strong> (<code>sdk.cashfree.com</code>) loaded on the registration page for checkout.</li>
+<li><strong>PhonePe SDK</strong> (<code>api.phonepe.com</code>) loaded on the registration page for checkout.</li>
 <li><strong>Hosting provider</strong> (e.g. Render/Hostinger) for infrastructure logs.</li>
 </ul>
 <p>Clicking those links or completing payment will share only the necessary data with that third party. We do not sell your data to advertisers.</p>
