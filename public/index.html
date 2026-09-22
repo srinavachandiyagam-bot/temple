@@ -34,9 +34,18 @@ h1,h2,h3{font-family:var(--font-display);color:var(--maroon-deep);line-height:1.
 .mobilemenu{display:none;border-top:1px solid var(--line);background:#fff;padding:10px 28px 16px}
 .mobilemenu.open{display:block}
 .mobilemenu a{display:block;padding:12px 4px;font-weight:700;border-bottom:1px solid #F3E9DA;min-height:44px}
-/* Hero */
-.hero{position:relative;background:#fff;padding:40px 0 14px}
-.hero .wrap{max-width:1296px;padding:0 8px}
+/* Hero - separate top media block (VIDEO FIRST) */
+.hero{position:relative;background:#fff;padding:28px 0 14px}
+.hero .wrap{max-width:920px;margin:0 auto;padding:0 8px}
+.hero-media{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border-radius:14px;background:#1a0f0a;box-shadow:var(--shadow-sm);margin-bottom:22px}
+.hero-media-video,.hero-media-fallback{width:100%;height:100%;object-fit:cover;object-position:center;display:block;background:#1a0f0a}
+.hero-media-fallback{position:absolute;inset:0}
+.hero-media--error .hero-media-video{display:none}
+.hero-media--error .hero-media-fallback{display:block!important}
+.hero-content{max-width:920px;margin:0 auto}
+.hero-content .eyebrow{margin-top:0}
+@media(max-width:1024px){.hero{padding:20px 0 12px}.hero .wrap{padding:0 30px}.hero-media{margin-bottom:18px}}
+@media(max-width:640px){.hero{padding:16px 0 10px}.hero .wrap{padding:0 15px}.hero-media{aspect-ratio:16/10;max-height:56vh;border-radius:10px}}
 .hero-grid{display:grid;grid-template-columns:586px 610px;gap:65px;align-items:start}
 .hero-grid>div:nth-child(2){padding-top:9px}
 .media-card{background:transparent;border:0;border-radius:0;overflow:visible;box-shadow:none}
@@ -265,9 +274,14 @@ html{scroll-padding-top:114px}.header-in{padding-left:23px;padding-right:15px;ga
 <div class="header-actions"><a class="wa-pill" id="headerWa" href="https://wa.me/919150232419" target="_blank" rel="noopener"><svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#1E9E4A" d="M16 3C8.8 3 3 8.8 3 16c0 2.3.6 4.5 1.7 6.5L3 29l6.7-1.7c1.9 1 4 1.6 6.3 1.6 7.2 0 13-5.8 13-13S23.2 3 16 3zm5.4 17.9c-.2.7-1.3 1.2-1.9 1.3-.5.1-1.1.1-1.8-.1-.4-.1-.9-.3-1.6-.6-2.8-1.2-4.7-4.1-4.8-4.3-.2-.2-1-1.2-1.2-2.9s.7-2.1 1-2.4c.3-.3.6-.3.7-.3h.6c.2 0 .4 0 .6.5.2.6.8 2 .9 2.1.1.1.1.3 0 .5-.1.2-.1.3-.3.5-.1.2-.3.4-.4.5-.1.1-.3.3-.1.6.2.3.7 1.2 1.5 1.9 1.1 1 2 1.2 2.3 1.4.3.1.4.1.6-.1.2-.2.7-.8.9-1.1.2-.3.4-.2.6-.1.2.1 1.6.8 1.9.9.3.1.5.2.5.3.1.2.1.7-.1 1.4z"/></svg><span><span data-ta="உதவி வேண்டுமா?" data-en="Need Help?">உதவி வேண்டுமா?</span><small>WhatsApp</small></span></a><a class="header-call" id="headerCall" href="tel:9150232419" aria-label="Call temple committee">☎</a><select id="language" class="langsel" aria-label="Language / மொழி"><option value="ta">தமிழ்</option><option value="en">English</option></select><button class="burger" id="menu" aria-label="Menu" aria-expanded="false">☰</button></div>
 </div><nav class="mobilemenu" id="links" aria-label="Mobile"><select id="languageMobile" class="langsel" aria-label="Language / மொழி"><option value="ta">தமிழ்</option><option value="en">English</option></select><a href="#about" data-ta="யாகம் பற்றி" data-en="About">யாகம் பற்றி</a><a href="#benefits" data-ta="பலன்கள்" data-en="Benefits">பலன்கள்</a><a href="#event" data-ta="நிகழ்வு" data-en="Event">நிகழ்வு</a><a href="#process" data-ta="யாக முறை" data-en="Process">யாக முறை</a><a href="#contact" data-ta="இடம்" data-en="Venue">இடம்</a><a href="#register" data-ta="பதிவு" data-en="Register">பதிவு</a><a href="#faq" data-ta="கேள்விகள்" data-en="FAQ">கேள்விகள்</a></nav></header>
 <main id="home">
-<section class="hero" aria-labelledby="heroTitle"><div class="wrap hero-grid">
-<div><div class="media-card"><div class="media-stage"><img id="heroImage" src="/uploads/poster.jpg" alt="நவசண்டி யாகம்" fetchpriority="high"><span class="sound-chip" aria-hidden="true">✦</span></div><div class="fact-row"><div><strong id="heroAmount">₹999</strong><span data-ta="பங்கேற்பு" data-en="Offering">பங்கேற்பு</span></div><div><strong id="heroFamily">1 + 4</strong><span data-ta="குடும்பம்" data-en="Family">குடும்பம்</span></div><div><strong id="heroDate">18-10-2026</strong><span data-ta="நாள்" data-en="Date">நாள்</span></div><a class="fact-action" id="heroMapMini" href="https://maps.app.goo.gl/qMuATXdpUUyAJoBz6?g_st=ic" target="_blank" rel="noopener" aria-label="View location"><span aria-hidden="true">⌖</span><span class="fact-label" data-ta="வழி" data-en="Map">வழி</span></a><a class="fact-action" id="heroWaMini" href="https://wa.me/919150232419" target="_blank" rel="noopener" aria-label="Share on WhatsApp"><span aria-hidden="true">↗</span><span class="fact-label" data-ta="பகிர்" data-en="Share">பகிர்</span></a></div></div></div>
-<div><p class="eyebrow">❋ <span id="heroEyebrow" data-ta="நவசண்டி யாகம் • சிறப்பு வேத ஆகம வழிபாடு" data-en="Nava Chandi Yagam • Special Vedic Worship">நவசண்டி யாகம் • சிறப்பு வேத ஆகம வழிபாடு</span> ❋</p>
+<section class="hero" aria-labelledby="heroTitle">
+<div class="wrap">
+<div class="hero-media" id="heroMedia">
+<video class="hero-media-video" id="heroVideo" autoplay muted loop playsinline poster="/uploads/poster.jpg" preload="metadata" aria-label="Nava Chandi Yagam video"><source src="/videos/hero-bg.mp4" type="video/mp4"></video>
+<img class="hero-media-fallback" id="heroFallback" src="/uploads/poster.jpg" alt="நவசண்டி யாகம்" style="display:none" loading="lazy">
+</div>
+<div class="hero-content">
+<p class="eyebrow">❋ <span id="heroEyebrow" data-ta="நவசண்டி யாகம் • சிறப்பு வேத ஆகம வழிபாடு" data-en="Nava Chandi Yagam • Special Vedic Worship">நவசண்டி யாகம் • சிறப்பு வேத ஆகம வழிபாடு</span> ❋</p>
 <h1 id="heroTitle">நவசண்டி யாகம்</h1>
 <p class="hero-sub" id="heroDesc">அன்னையின் அருளைப் பெற குடும்பத்துடன் பங்கேற்க வாருங்கள்.</p>
 <div class="info-card"><div class="info-row"><span class="ic" aria-hidden="true">ॐ</span><div><small data-ta="திருக்கோவில்" data-en="Temple">திருக்கோவில்</small><strong id="venueHero">அருள்மிகு ஸ்ரீ மாரியம்மன் திருக்கோவில், செந்தம்பாளையம்</strong></div></div><div class="info-row"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#8B1E0F" d="M7 2v2H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-2V2h-2v2H9V2H7zm0 6h10v12H7V8zm2 2v2h2v-2H9zm4 0v2h2v-2h-2z"/></svg></span><div><small data-ta="நாள் • நேரம்" data-en="Date • Time">நாள் • நேரம்</small><strong><span id="dateHero">18-10-2026</span> • <span id="timeHero">காலை 7:00 மணி</span></strong></div></div></div>
@@ -276,7 +290,9 @@ html{scroll-padding-top:114px}.header-in{padding-left:23px;padding-right:15px;ga
 <a class="cta-main" href="#register"><span id="heroCtaPrice">₹999</span><span class="div" aria-hidden="true"></span><span id="heroCtaLabel" data-ta="பங்கேற்க பதிவு செய்யவும்" data-en="Register to Participate">பங்கேற்க பதிவு செய்யவும்</span></a>
 <div class="cta-row"><a class="cta-alt wa" id="waCta" href="https://wa.me/919150232419" target="_blank" rel="noopener"><span data-ta="WhatsApp-ல் பதிவு" data-en="Book via WhatsApp">WhatsApp-ல் பதிவு</span></a><a class="cta-alt call" id="callCta" href="tel:9150232419"><span data-ta="அழைத்துப் பதிவு" data-en="Book via Call">அழைத்துப் பதிவு</span></a></div>
 <div class="assure-grid"><div class="a"><span class="tick">✓</span><span data-ta="குடும்ப சங்கல்பத்துடன் பங்கேற்பு" data-en="Family sankalpam participation">குடும்ப சங்கல்பத்துடன் பங்கேற்பு</span></div><div class="a"><span class="tick">✓</span><span data-ta="வேத ஆகம முறை வழிபாடு" data-en="Vedic worship observance">வேத ஆகம முறை வழிபாடு</span></div><div class="a"><span class="tick">✓</span><span data-ta="கோவில் குழு ஏற்பாடு" data-en="Organised by temple committee">கோவில் குழு ஏற்பாடு</span></div><div class="a"><span class="tick">✓</span><span data-ta="நேரடித் தொடர்பு உதவி" data-en="Direct contact support">நேரடித் தொடர்பு உதவி</span></div></div>
-</div></div></section>
+</div>
+</div>
+</section>
 <div class="sacred-divider" aria-hidden="true"><span>♦</span></div>
 <div class="trust"><div class="trust-in"><div class="t"><span class="tick">✓</span><span data-ta="குடும்ப சங்கல்பம்" data-en="Family sankalpam">குடும்ப சங்கல்பம்</span></div><div class="t"><span class="tick">✓</span><span data-ta="வேத ஆகம முறை" data-en="Vedic tradition">வேத ஆகம முறை</span></div><div class="t"><span class="tick">✓</span><span data-ta="திருக்கோவில் வளாகம்" data-en="Temple premises">திருக்கோவில் வளாகம்</span></div><div class="t"><span class="tick">✓</span><span data-ta="நேரடி உதவி" data-en="Direct assistance">நேரடி உதவி</span></div></div></div>
 <nav class="secnav" aria-label="Sections"><div class="secnav-in" id="sectionNav"><a href="#about" data-spy="about" data-ta="யாகம் பற்றி" data-en="About">யாகம் பற்றி</a><a href="#benefits" data-spy="benefits" data-ta="பலன்கள்" data-en="Benefits">பலன்கள்</a><a href="#event" data-spy="event" data-ta="நிகழ்வு" data-en="Event">நிகழ்வு</a><a href="#process" data-spy="process" data-ta="யாக முறை" data-en="Process">யாக முறை</a><a href="#contact" data-spy="contact" data-ta="இடம்" data-en="Venue">இடம்</a><a href="#included" data-spy="included" data-ta="உங்களுக்கு" data-en="Included">உங்களுக்கு</a><a href="#register" data-spy="register" data-ta="பதிவு" data-en="Register">பதிவு</a><a href="#faq" data-spy="faq" data-ta="கேள்விகள்" data-en="FAQ">கேள்விகள்</a></div></nav>
@@ -556,7 +572,28 @@ async function load(){
   if(s.require_gothram==='1'||s.require_gothram===1){const g=document.querySelector('input[name="gothram"]'); if(g) g.setAttribute('required','true');}
   const imgs=(DATA.images||[]);
   const hero=imgs.find(x=>x.is_hero)||imgs[0];
-  if(hero){const hSrc=resolveImg(hero); if(hSrc) $('#heroImage').src=hSrc;}
+  const heroFallback=document.getElementById('heroFallback');
+  const heroVideoEl=document.getElementById('heroVideo');
+  if(hero && heroFallback){
+    const hSrc=resolveImg(hero);
+    if(hSrc){
+      heroFallback.src=hSrc;
+      if(heroVideoEl) heroVideoEl.poster=hSrc;
+    }
+  }
+  // If admin has uploaded videos, use the first video as the top hero media (VIDEO FIRST)
+  // Falls back to /videos/hero-bg.mp4 (persistent Hostinger storage) if no admin video
+  const vidsForHero=(DATA.videos||[]);
+  if(vidsForHero.length && heroVideoEl){
+    const firstVid=vidsForHero[0];
+    const vSrc=firstVid.url?firstVid.url:(firstVid.filename&&!String(firstVid.filename).startsWith('data:')?(String(firstVid.filename).startsWith('http')?firstVid.filename:('/videos/'+encodeURIComponent(String(firstVid.filename).split('/').pop()))):(firstVid.datauri||''));
+    if(vSrc){
+      const source=heroVideoEl.querySelector('source');
+      if(source) source.src=vSrc;
+      else heroVideoEl.src=vSrc;
+      heroVideoEl.load();
+    }
+  }
   const grid=$('#galleryGrid');
   const gal=imgs.filter(x=>!x.is_hero);
   const galSec=$('#gallery');
@@ -743,6 +780,67 @@ function initLightbox(){
     }
   });
 }
+function initHeroVideo(){
+  const video=document.getElementById('heroVideo');
+  const media=document.getElementById('heroMedia');
+  const fallback=document.getElementById('heroFallback');
+  if(!video || !media) return;
+  function showFallback(){
+    media.classList.add('hero-media--error');
+    if(fallback) fallback.style.display='block';
+    video.style.display='none';
+  }
+  function showVideo(){
+    media.classList.remove('hero-media--error');
+    if(fallback) fallback.style.display='none';
+    video.style.display='block';
+  }
+  // If video file not found, fallback will trigger via error event
+  video.addEventListener('error', showFallback);
+  video.addEventListener('emptied', showFallback);
+  // If video loads, ensure fallback hidden
+  video.addEventListener('loadeddata', showVideo);
+  video.addEventListener('canplay', ()=>{
+    showVideo();
+    if(video.paused && !document.hidden && !window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+      video.play().catch(()=>{});
+    }
+  });
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    video.pause();
+    video.removeAttribute('autoplay');
+    return;
+  }
+  if('IntersectionObserver' in window){
+    const hero=document.querySelector('.hero');
+    if(hero){
+      const obs=new IntersectionObserver(entries=>{
+        entries.forEach(entry=>{
+          if(entry.isIntersecting){
+            if(video.paused && !media.classList.contains('hero-media--error')) video.play().catch(()=>{});
+          } else {
+            video.pause();
+          }
+        });
+      },{threshold:0.15});
+      obs.observe(hero);
+    }
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden) video.pause();
+    else if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches && !media.classList.contains('hero-media--error')){
+      const hero=document.querySelector('.hero');
+      if(hero && hero.getBoundingClientRect().top < window.innerHeight && hero.getBoundingClientRect().bottom > 0){
+        video.play().catch(()=>{});
+      }
+    }
+  });
+  // Probe video availability - if 404, show fallback immediately (for local dev without video file)
+  fetch(video.querySelector('source')?.src || video.src || '/videos/hero-bg.mp4', {method:'HEAD'}).then(r=>{
+    if(!r.ok) showFallback();
+  }).catch(()=>{});
+}
+initHeroVideo();
 initLightbox();
 
 initFaq(); initSpy(); initSticky();
