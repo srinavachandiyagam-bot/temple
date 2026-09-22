@@ -146,14 +146,21 @@ function deleteImage(id) {
   return true;
 }
 
-function addVideo({ filename, title_ta, title_en, url }) {
+function addVideo({ filename, title_ta, title_en, url, is_hero }) {
   const data = loadData();
   const id = Date.now();
+  const isHeroNum = is_hero === '1' || is_hero === 1 || is_hero === true ? 1 : 0;
+
+  if (isHeroNum === 1) {
+    data.videos.forEach(v => { v.is_hero = 0; });
+  }
+
   const vidObj = {
     id,
     filename,
     title_ta: title_ta || '',
-    title_en: title_en || ''
+    title_en: title_en || '',
+    is_hero: isHeroNum
   };
   if (url) vidObj.url = url;
   if (filename && filename.startsWith('http')) {
@@ -166,7 +173,7 @@ function addVideo({ filename, title_ta, title_en, url }) {
   return vidObj;
 }
 
-function updateVideo(id, { title_ta, title_en }) {
+function updateVideo(id, { title_ta, title_en, is_hero }) {
   const data = loadData();
   const numId = Number(id);
   const vid = data.videos.find(x => x.id === numId);
@@ -174,6 +181,13 @@ function updateVideo(id, { title_ta, title_en }) {
 
   if (title_ta !== undefined) vid.title_ta = title_ta;
   if (title_en !== undefined) vid.title_en = title_en;
+  if (is_hero !== undefined) {
+    const heroNum = is_hero === '1' || is_hero === 1 || is_hero === true ? 1 : 0;
+    if (heroNum === 1) {
+      data.videos.forEach(x => { x.is_hero = 0; });
+    }
+    vid.is_hero = heroNum;
+  }
 
   saveData(data);
   return vid;
