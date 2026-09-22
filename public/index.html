@@ -332,13 +332,12 @@ html{scroll-padding-top:114px}.header-in{padding-left:23px;padding-right:15px;ga
 
 </section>
 <section class="block" id="register"><p class="kicker" data-ta="பதிவு" data-en="Registration">பதிவு</p><h2 data-ta="பங்கேற்பு பதிவு" data-en="Participation Registration">பங்கேற்பு பதிவு</h2>
-<p class="prose" id="regNote">முதன்மை நபரின் விவரங்களுடன் ராசி, நட்சத்திரம், கோத்திரம் மற்றும் அதிகபட்சம் 4 குடும்ப உறுப்பினர்களின் விவரங்களை தேர்வு செய்து பதிவு செய்யலாம்.</p>
+<p class="prose" id="regNote">முதன்மை நபரின் விவரங்களுடன் ராசி, நட்சத்திரம் மற்றும் அதிகபட்சம் 4 குடும்ப உறுப்பினர்களின் விவரங்களை தேர்வு செய்து பதிவு செய்யலாம்.</p>
 <div class="form-shell"><form id="reg">
 <fieldset><legend data-ta="முதன்மை பங்கேற்பாளர்" data-en="Primary Participant">முதன்மை பங்கேற்பாளர்</legend><div class="fgrid">
 <div class="field"><label for="fName"><span data-ta="முதன்மை நபர் பெயர்" data-en="Primary Participant Name">முதன்மை நபர் பெயர்</span> <span class="req" aria-hidden="true">*</span></label><input id="fName" name="name" required autocomplete="name"></div>
 <div class="field"><label for="fMobile"><span data-ta="மொபைல் எண்" data-en="Mobile Number">மொபைல் எண்</span> <span class="req" aria-hidden="true">*</span></label><input id="fMobile" name="mobile" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" required autocomplete="tel"></div>
 <div class="field"><label for="fEmail"><span data-ta="மின்னஞ்சல்" data-en="Email">மின்னஞ்சல்</span></label><input id="fEmail" name="email" type="email" autocomplete="email"></div>
-<div class="field"><label for="fGothram"><span data-ta="கோத்திரம்" data-en="Gothram">கோத்திரம்</span></label><input id="fGothram" name="gothram"></div>
 <div class="field"><label for="rasi"><span data-ta="ராசி" data-en="Rasi">ராசி</span> <span class="req" aria-hidden="true">*</span></label><select name="rasi" id="rasi" required></select></div>
 <div class="field"><label for="natchathiram"><span data-ta="நட்சத்திரம்" data-en="Natchathiram">நட்சத்திரம்</span> <span class="req" aria-hidden="true">*</span></label><select name="natchathiram" id="natchathiram" required></select></div>
 <div class="field full"><label for="fAddr"><span data-ta="முகவரி" data-en="Address">முகவரி</span></label><textarea id="fAddr" name="address" autocomplete="street-address"></textarea></div>
@@ -397,7 +396,6 @@ function captureMembers(){
   document.querySelectorAll('#members .member').forEach((m)=>{
     out.push({
       name:m.querySelector('[name$="[name]"]')?.value||'',
-      gothram:m.querySelector('[name$="[gothram]"]')?.value||'',
       rasi:m.querySelector('.mrasi')?.value||'',
       natchathiram:m.querySelector('.mnak')?.value||''
     });
@@ -419,7 +417,6 @@ function memberBlock(i,v={}){
   const t=text(`குடும்ப உறுப்பினர் ${i}`,`Family Member ${i}`);
   return `<div class="member"><h3>${t}</h3><div class="fgrid">
     <div class="field"><label>${text('பெயர் *','Name *')}</label><input name="member${i}[name]" value="${esc(v.name)}" required autocomplete="off"></div>
-    <div class="field"><label>${text('கோத்திரம்','Gothram')}</label><input name="member${i}[gothram]" value="${esc(v.gothram)}" autocomplete="off"></div>
     <div class="field"><label>${text('ராசி','Rasi')}</label><select name="member${i}[rasi]" class="mrasi"></select></div>
     <div class="field"><label>${text('நட்சத்திரம்','Natchathiram')}</label><select name="member${i}[natchathiram]" class="mnak"></select></div>
   </div></div>`;
@@ -573,7 +570,6 @@ async function load(){
   if(faqWhen) faqWhen.textContent=text(`${s['date_ta']||''} ${s['time_ta']||''}, ${s['venue_ta']||''} நடைபெறும்.`,`${s['date_en']||''} ${s['time_en']||''} at ${s['venue_en']||''}.`);
   if(s.require_email==='1'||s.require_email===1){const e=document.querySelector('input[name="email"]'); if(e) e.setAttribute('required','true');}
   if(s.require_address==='1'||s.require_address===1){const a=document.querySelector('textarea[name="address"]'); if(a) a.setAttribute('required','true');}
-  if(s.require_gothram==='1'||s.require_gothram===1){const g=document.querySelector('input[name="gothram"]'); if(g) g.setAttribute('required','true');}
   const imgs=(DATA.images||[]);
   const hero=imgs.find(x=>x.is_hero)||imgs[0];
   const heroFallback=document.getElementById('heroFallback');
@@ -652,8 +648,8 @@ async function checkPaymentReturn(){
 $('#reg').onsubmit=async e=>{
   e.preventDefault();
   const consent=document.getElementById('policyConsent'); if(consent && !consent.checked){ const m=document.getElementById('regMsg'); if(m){ m.className='msg error'; m.style.display='block'; m.textContent=(typeof text==='function'? text('தயவுசெய்து விதிமுறைகளை ஏற்கவும்.','Please accept the Terms & Conditions and policies to proceed.'):'Please accept the Terms & Conditions and policies to proceed.'); } consent.focus(); return; }
-  const f=new FormData(e.target), b={name:f.get('name'),mobile:f.get('mobile'),email:f.get('email'),address:f.get('address'),rasi:f.get('rasi'),natchathiram:f.get('natchathiram'),gothram:f.get('gothram')};
-  for(let i=1;i<=4;i++){const n=f.get(`member${i}[name]`);if(n)b['member'+i]={name:n,rasi:f.get(`member${i}[rasi]`),natchathiram:f.get(`member${i}[natchathiram]`),gothram:f.get(`member${i}[gothram]`)}}
+  const f=new FormData(e.target), b={name:f.get('name'),mobile:f.get('mobile'),email:f.get('email'),address:f.get('address'),rasi:f.get('rasi'),natchathiram:f.get('natchathiram')};
+  for(let i=1;i<=4;i++){const n=f.get(`member${i}[name]`);if(n)b['member'+i]={name:n,rasi:f.get(`member${i}[rasi]`),natchathiram:f.get(`member${i}[natchathiram]`)}}
   const m=$('#regMsg'); m.className='msg'; m.style.display='block'; m.textContent=text('பதிவு மற்றும் பணம் செலுத்தும் பக்கத்தைத் திறக்கிறது...','Creating your registration and payment...');
   const submitBtn = e.target.querySelector('button[type="submit"]');
   try{
