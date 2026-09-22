@@ -673,10 +673,7 @@ $('#reg').onsubmit=async e=>{
     } else if(data.redirectUrl || data.checkoutUrl) {
       showRegMessage(true, text('பணம் செலுத்தும் பக்கத்திற்கு மாற்றப்படுகிறது...','Redirecting to PhonePe...'));
       const redirectUrl = data.redirectUrl || data.checkoutUrl;
-      phonepe.checkout({
-        paymentSessionId: data.paymentSessionId,
-        redirectTarget: '_self'
-      });
+      window.location.href = redirectUrl;
     } else {
       showRegMessage(true, text(`பதிவு செய்யப்பட்டது! பதிவு எண்: ${data.registrationId}`, `Registration created! ID: ${data.registrationId}`));
     }
