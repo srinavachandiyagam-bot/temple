@@ -26,8 +26,8 @@ The application is built to run smoothly on Hostinger with:
 
 | Hostinger Plan Type | Deployment Method | Recommended Node.js Version |
 |---|---|---|
-| **Hostinger Web / Cloud Hosting** (Business / Cloud Startup / Cloud Professional) | **Method 1** (hPanel Graphical Interface) | Node.js 18.x or 20.x LTS |
-| **Hostinger VPS** (KVM 1, KVM 2, KVM 4, etc.) | **Method 2** (SSH Terminal + PM2 + Nginx) | Node.js 20.x LTS |
+| **Hostinger Web / Cloud Hosting** (Business / Cloud Startup / Cloud Professional) | **Method 1** (hPanel Graphical Interface) | Node.js 22.x LTS (stable, required for `node:sqlite` fallback) |
+| **Hostinger VPS** (KVM 1, KVM 2, KVM 4, etc.) | **Method 2** (SSH Terminal + PM2 + Nginx) | Node.js 22.x LTS |
 
 ---
 
@@ -54,7 +54,7 @@ On your local computer, select all files in the `temple/` directory **EXCEPT** `
 1. In hPanel, go to **Advanced** → **Node.js** (or type `Node.js` in the hPanel search bar).
 2. Click **Create Application** (or Edit if one already exists).
 3. Fill in the application settings:
-   - **Node.js version**: Select `20.x` (or `18.x`).
+   - **Node.js version**: Select `22.x` LTS (22.5+ required for `node:sqlite` GLIBC-independent fallback; 22.20.x stable recommended).
    - **Application mode**: Select `Production`.
    - **Application root**: Select or enter `/public_html` (or your domain path).
    - **Application startup file**: Enter `index.js` (or `server.js`).
@@ -113,8 +113,8 @@ ssh root@YOUR_HOSTINGER_VPS_IP
 # Update Ubuntu packages
 sudo apt update && sudo apt upgrade -y
 
-# Install Node.js 20.x LTS
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+# Install Node.js 22.x LTS (stable, 22.5+ required for node:sqlite)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs nginx certbot python3-certbot-nginx git
 
 # Install PM2 Process Manager globally

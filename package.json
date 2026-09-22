@@ -10,7 +10,7 @@
     "test": "node test/test-unit.js && node test/test-server.js && node test/test-mock-flow.js && node test/test-admin.js && node test/test-sqlite.js && node test/test-admin-roles.js && node test/test-pricing.js && node test/test-mock-routing.js && node test/test-registration-fee.js && node test/test-migration-startup.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.5.0"
   },
   "keywords": [
     "temple",
@@ -30,9 +30,12 @@
     "multer": "^2.3.0",
     "pg": "^8.13.3",
     "qs": "^6.16.0",
-    "sqlite3": "^6.0.1"
+    "sqlite3": "^5.1.7"
   },
   "overrides": {
     "qs": "^6.16.0"
+  },
+  "allowScripts": {
+    "sqlite3@5.1.7": true
   }
 }
