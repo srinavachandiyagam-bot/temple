@@ -18,3 +18,19 @@ Thumbs.db
 .idea/
 
 .playwright-mcp/
+
+# Hostinger 50GB persistent storage - NEVER commit or delete on deploy
+# These paths are preserved across ZIP deployments (see HOSTINGER_DEPLOYMENT_GUIDE.md)
+# data/temple.db      -> SQLite registrations (must survive redeploy)
+# public/uploads/*    -> Admin temple photos (must survive redeploy)
+# public/videos/*     -> Admin temple videos (must survive redeploy)
+data/temple.db
+data/*.db
+!data/.gitkeep
+public/uploads/*
+!public/uploads/.gitkeep
+public/videos/*
+!public/videos/.gitkeep
+
+# Hostinger deploy backup (sibling to app dir, never in repo)
+.nava-chandi-persistent-backup/
