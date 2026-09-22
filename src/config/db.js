@@ -167,12 +167,32 @@ function sqliteAll(dbInstance, sql, params = []) {
 function initSqliteDb() {
   return new Promise((resolveInit, rejectInit) => {
     let sqlite3;
+    let useNodeSqliteFallback = false;
+    let NodeDatabaseSync = null;
     try {
       sqlite3 = require('sqlite3').verbose();
     } catch (err) {
-      console.error('❌ Could not load sqlite3 native binary:', err.message);
-      rejectInit(err);
-      return;
+      const msg = err && err.message ? err.message : String(err);
+      const isGlibcMismatch = /GLIBC_2\.38/i.test(msg) || /libm\.so\.6/i.test(msg) || /version.*GLIBC/i.test(msg);
+      if (isGlibcMismatch) {
+        console.error('❌ Could not load sqlite3 native binary (GLIBC mismatch on Hostinger):', msg);
+        console.warn('⚠️ Hostinger runtime lacks GLIBC_2.38 required by sqlite3@6.0.1. This build uses sqlite3@5.1.7 (prebuilt for GLIBC 2.28/2.31) which is compatible with CloudLinux 8/9 (Hostinger shared).');
+        console.warn('⚠️ Attempting fallback to Node built-in sqlite (node:sqlite) which avoids native GLIBC dependency...');
+        try {
+          ({ DatabaseSync: NodeDatabaseSync } = require('node:sqlite'));
+          useNodeSqliteFallback = true;
+          console.log('✅ Fallback to node:sqlite available (Node >=22.5) – proceeding without native addon.');
+        } catch (fallbackErr) {
+          console.error('❌ Fallback node:sqlite not available (requires Node >=22.5):', fallbackErr.message);
+          console.error('💡 Fix: ensure sqlite3@5.1.7 is installed (npm install sqlite3@5.1.7) – its prebuild is compatible with Hostinger GLIBC. Current pkg requires GLIBC_2.38 unavailable on host.');
+          rejectInit(err);
+          return;
+        }
+      } else {
+        console.error('❌ Could not load sqlite3 native binary:', msg);
+        rejectInit(err);
+        return;
+      }
     }
 
     const sqliteDbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, '../../data/temple.db');
@@ -184,6 +204,96 @@ function initSqliteDb() {
     } catch (dirErr) {
       console.error('❌ Could not create SQLite data directory:', dirErr.message);
       rejectInit(dirErr);
+      return;
+    }
+
+    // Shared migration runner (preserves existing schema/migrations intact)
+    async function runSQLiteMigrations(dbInstance) {
+      const schemaPath = path.join(__dirname, '../../db/schema_sqlite.sql');
+      if (!fs.existsSync(schemaPath)) {
+        throw new Error(`SQLite schema file missing: ${schemaPath}`);
+      }
+      const sql = fs.readFileSync(schemaPath, 'utf8');
+      await sqliteExec(dbInstance, sql);
+
+      // Backward-compatible: ensure phonepe/cashfree/donation columns on pre-existing DB files.
+      const cols = await sqliteAll(dbInstance, 'PRAGMA table_info(registrations)');
+      const existing = new Set((cols || []).map(c => c.name));
+      if (!existing.has('donation_amount')) {
+        await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0');
+      }
+      if (!existing.has('phonepe_merchant_order_id')) {
+        await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_merchant_order_id TEXT');
+      }
+      if (!existing.has('phonepe_order_id')) {
+        await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_order_id TEXT');
+      }
+      if (!existing.has('phonepe_transaction_id')) {
+        await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_transaction_id TEXT');
+      }
+      if (!existing.has('cashfree_order_id')) {
+        await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN cashfree_order_id TEXT');
+      }
+      // Ensure indexes exist after columns are added
+      try { await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registrations_phonepe_merchant_order_id ON registrations (phonepe_merchant_order_id)'); } catch(e) {}
+      try { await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registrations_cashfree_order_id ON registrations (cashfree_order_id)'); } catch(e) {}
+
+      // Explicit app_settings guarantee (separate awaited op).
+      await sqliteExec(dbInstance, SQLITE_APP_SETTINGS_CREATE_SQL);
+
+      console.log('✅ SQLite schema verified/initialized successfully.');
+    }
+
+    if (useNodeSqliteFallback) {
+      // GLIBC-independent fallback using Node's built-in sqlite (Node >=22.5)
+      // No native addon, avoids GLIBC_2.38 entirely. Preserves same schema/migrations.
+      try {
+        const db = new NodeDatabaseSync(sqliteDbPath);
+        // Adapter exposing sqlite3-like async callback API for existing helpers
+        const adapter = {
+          exec: (sql, cb) => {
+            try { db.exec(sql); cb(null); } catch (e) { cb(e); }
+          },
+          run: (sql, params, cb) => {
+            if (typeof params === 'function') { cb = params; params = []; }
+            const args = Array.isArray(params) ? params : [];
+            try {
+              const stmt = db.prepare(sql);
+              const result = stmt.run(...args);
+              const ctx = { changes: result.changes, lastID: result.lastInsertRowid };
+              if (cb) cb.call(ctx, null);
+            } catch (e) { if (cb) cb(e); }
+          },
+          all: (sql, params, cb) => {
+            if (typeof params === 'function') { cb = params; params = []; }
+            const args = Array.isArray(params) ? params : [];
+            try {
+              const stmt = db.prepare(sql);
+              const rows = stmt.all(...args);
+              if (cb) cb(null, rows);
+            } catch (e) { if (cb) cb(e); }
+          },
+          close: (cb) => {
+            try { db.close(); if (cb) cb(null); } catch (e) { if (cb) cb(e); }
+          },
+          _db: db
+        };
+        sqliteDb = adapter;
+        console.log(`🗄️ Using Node built-in sqlite (GLIBC-independent fallback) at: ${sqliteDbPath}`);
+
+        (async () => {
+          try {
+            await runSQLiteMigrations(adapter);
+            resolveInit();
+          } catch (migrateErr) {
+            console.error('❌ SQLite schema initialization failed (node:sqlite fallback):', migrateErr && migrateErr.message ? migrateErr.message : migrateErr);
+            rejectInit(migrateErr);
+          }
+        })();
+      } catch (err) {
+        console.error('❌ Failed to open SQLite database (node:sqlite fallback):', err.message);
+        rejectInit(err);
+      }
       return;
     }
 
@@ -200,39 +310,7 @@ function initSqliteDb() {
 
         (async () => {
           try {
-            const schemaPath = path.join(__dirname, '../../db/schema_sqlite.sql');
-            if (!fs.existsSync(schemaPath)) {
-              throw new Error(`SQLite schema file missing: ${schemaPath}`);
-            }
-            const sql = fs.readFileSync(schemaPath, 'utf8');
-            await sqliteExec(dbInstance, sql);
-
-            // Backward-compatible: ensure phonepe/cashfree/donation columns on pre-existing DB files.
-            const cols = await sqliteAll(dbInstance, 'PRAGMA table_info(registrations)');
-            const existing = new Set((cols || []).map(c => c.name));
-            if (!existing.has('donation_amount')) {
-              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN donation_amount REAL NOT NULL DEFAULT 0');
-            }
-            if (!existing.has('phonepe_merchant_order_id')) {
-              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_merchant_order_id TEXT');
-            }
-            if (!existing.has('phonepe_order_id')) {
-              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_order_id TEXT');
-            }
-            if (!existing.has('phonepe_transaction_id')) {
-              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN phonepe_transaction_id TEXT');
-            }
-            if (!existing.has('cashfree_order_id')) {
-              await sqliteRun(dbInstance, 'ALTER TABLE registrations ADD COLUMN cashfree_order_id TEXT');
-            }
-            // Ensure indexes exist after columns are added
-            try { await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registrations_phonepe_merchant_order_id ON registrations (phonepe_merchant_order_id)'); } catch(e) {}
-            try { await sqliteExec(dbInstance, 'CREATE INDEX IF NOT EXISTS idx_registrations_cashfree_order_id ON registrations (cashfree_order_id)'); } catch(e) {}
-
-            // Explicit app_settings guarantee (separate awaited op).
-            await sqliteExec(dbInstance, SQLITE_APP_SETTINGS_CREATE_SQL);
-
-            console.log('✅ SQLite schema verified/initialized successfully.');
+            await runSQLiteMigrations(dbInstance);
             resolveInit();
           } catch (migrateErr) {
             console.error(
