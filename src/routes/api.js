@@ -586,13 +586,13 @@ router.delete('/images/:id', requireAdminAuth, (req, res) => {
   }
 });
 
-// Upload Video - supports R2 persistent storage or local fallback
+// Upload Video - supports R2 persistent storage or local fallback (Hero Video via is_hero)
 router.post('/videos', requireAdminAuth, uploadVideo.single('video'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No video file uploaded' });
     }
-    const { title_ta, title_en } = req.body;
+    const { title_ta, title_en, is_hero } = req.body;
     const path = require('path');
     let filename = req.file.filename;
     let fileUrl = null;
@@ -631,7 +631,8 @@ router.post('/videos', requireAdminAuth, uploadVideo.single('video'), async (req
       filename: filename || req.file.filename,
       title_ta,
       title_en,
-      url: fileUrl
+      url: fileUrl,
+      is_hero
     });
     res.json({ success: true, video: vid });
   } catch (err) {
