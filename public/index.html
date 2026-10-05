@@ -332,13 +332,12 @@ html{scroll-padding-top:114px}.header-in{padding-left:23px;padding-right:15px;ga
 
 </section>
 <section class="block" id="register"><p class="kicker" data-ta="பதிவு" data-en="Registration">பதிவு</p><h2 data-ta="பங்கேற்பு பதிவு" data-en="Participation Registration">பங்கேற்பு பதிவு</h2>
-<p class="prose" id="regNote">முதன்மை நபரின் விவரங்களுடன் ராசி, நட்சத்திரம், கோத்திரம் மற்றும் அதிகபட்சம் 4 குடும்ப உறுப்பினர்களின் விவரங்களை தேர்வு செய்து பதிவு செய்யலாம்.</p>
+<p class="prose" id="regNote">முதன்மை நபரின் விவரங்களுடன் ராசி, நட்சத்திரம் மற்றும் அதிகபட்சம் 4 குடும்ப உறுப்பினர்களின் விவரங்களை தேர்வு செய்து பதிவு செய்யலாம்.</p>
 <div class="form-shell"><form id="reg">
 <fieldset><legend data-ta="முதன்மை பங்கேற்பாளர்" data-en="Primary Participant">முதன்மை பங்கேற்பாளர்</legend><div class="fgrid">
 <div class="field"><label for="fName"><span data-ta="முதன்மை நபர் பெயர்" data-en="Primary Participant Name">முதன்மை நபர் பெயர்</span> <span class="req" aria-hidden="true">*</span></label><input id="fName" name="name" required autocomplete="name"></div>
 <div class="field"><label for="fMobile"><span data-ta="மொபைல் எண்" data-en="Mobile Number">மொபைல் எண்</span> <span class="req" aria-hidden="true">*</span></label><input id="fMobile" name="mobile" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" required autocomplete="tel"></div>
 <div class="field"><label for="fEmail"><span data-ta="மின்னஞ்சல்" data-en="Email">மின்னஞ்சல்</span></label><input id="fEmail" name="email" type="email" autocomplete="email"></div>
-
 <div class="field"><label for="rasi"><span data-ta="ராசி" data-en="Rasi">ராசி</span></label><select name="rasi" id="rasi"></select></div>
 <div class="field"><label for="natchathiram"><span data-ta="நட்சத்திரம்" data-en="Natchathiram">நட்சத்திரம்</span></label><select name="natchathiram" id="natchathiram"></select></div>
 <div class="field full"><label for="fAddr"><span data-ta="முகவரி" data-en="Address">முகவரி</span></label><textarea id="fAddr" name="address" autocomplete="street-address"></textarea></div>
@@ -670,10 +669,7 @@ $('#reg').onsubmit=async e=>{
     } else if(data.redirectUrl || data.checkoutUrl) {
       showRegMessage(true, text('பணம் செலுத்தும் பக்கத்திற்கு மாற்றப்படுகிறது...','Redirecting to PhonePe...'));
       const redirectUrl = data.redirectUrl || data.checkoutUrl;
-      phonepe.checkout({
-        paymentSessionId: data.paymentSessionId,
-        redirectTarget: '_self'
-      });
+      window.location.href = redirectUrl;
     } else {
       showRegMessage(true, text(`பதிவு செய்யப்பட்டது! பதிவு எண்: ${data.registrationId}`, `Registration created! ID: ${data.registrationId}`));
     }

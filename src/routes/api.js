@@ -21,6 +21,27 @@ const {
 const { uploadImage, uploadVideo } = require('../config/uploader');
 const requireMockMode = require('../middleware/requireMockMode');
 
+// Timestamps are stored in UTC (Postgres TIMESTAMPTZ / SQLite CURRENT_TIMESTAMP).
+// Normalize to unambiguous ISO-8601 UTC so clients can render Asia/Kolkata
+// without guessing. SQLite returns naive "YYYY-MM-DD HH:MM:SS" (UTC);
+// Postgres/pg and the mock DB return Date objects serialized as ISO.
+function toUtcIso(value) {
+  if (value === null || value === undefined) return value;
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? value : value.toISOString();
+  }
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (!s) return s;
+    const naive = s.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/);
+    if (naive) return `${naive[1]}T${naive[2]}Z`;
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString();
+    return value;
+  }
+  return value;
+}
+
 // ====================================================================
 // 1. PUBLIC DEVOTEE & EVENT ENDPOINTS
 // ====================================================================
@@ -297,6 +318,9 @@ router.get('/registrations', requireAdminAuth, async (req, res, next) => {
       reg.phonepe_merchant_order_id = reg.phonepe_merchant_order_id || reg.cashfree_order_id;
       reg.order_id = reg.phonepe_merchant_order_id || reg.cashfree_order_id;
       reg.phonepe_order_id = reg.phonepe_order_id || null;
+      // Unambiguous UTC ISO-8601; frontend converts to Asia/Kolkata for display.
+      reg.created_at = toUtcIso(reg.created_at);
+      reg.updated_at = toUtcIso(reg.updated_at);
     }
 
     for (const reg of registrations) {
@@ -465,7 +489,7 @@ router.get('/export.csv', async (req, res, next) => {
         donationVal,
         totalVal,
         r.cashfree_order_id || '',
-        new Date(r.created_at).toISOString(),
+        new Date(toUtcIso(r.created_at)).toISOString(),
         familyStr
       ]);
     }
