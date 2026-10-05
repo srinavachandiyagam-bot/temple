@@ -3,7 +3,7 @@
  */
 
 function validateRegistration(req, res, next) {
-  const { name, mobile, email, address, rasi, natchathiram, gothram } = req.body || {};
+  const { name, mobile, email, address, rasi, natchathiram } = req.body || {};
   const errors = [];
 
   // 1. Primary Devotee Name (Required)
@@ -73,7 +73,7 @@ function validateRegistration(req, res, next) {
     address: address && typeof address === 'string' ? address.trim() : null,
     rasi: rasi && typeof rasi === 'string' ? rasi.trim() : null,
     natchathiram: natchathiram && typeof natchathiram === 'string' ? natchathiram.trim() : null,
-    gothram: gothram && typeof gothram === 'string' ? gothram.trim() : null,
+    gothram: null,
     donationAmount: donation.value,
     members: []
   };
@@ -86,7 +86,7 @@ function validateRegistration(req, res, next) {
         name: m.name.trim(),
         rasi: m.rasi ? String(m.rasi).trim() : null,
         natchathiram: m.natchathiram ? String(m.natchathiram).trim() : null,
-        gothram: m.gothram ? String(m.gothram).trim() : null
+        gothram: null
       });
     }
   }
